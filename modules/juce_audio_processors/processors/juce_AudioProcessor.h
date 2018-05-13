@@ -1352,6 +1352,7 @@ public:
         wrapperType_AudioUnitv3,
         wrapperType_RTAS,
         wrapperType_AAX,
+        wrapperType_LV2,
         wrapperType_Standalone
     };
 

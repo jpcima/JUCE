@@ -1429,7 +1429,7 @@ public:
 
                     if (lastControlValues[i] != curValue)
                     {
-                        filter->setParameter (i, curValue);
+                        filter->setParameterNotifyingHost (i, curValue);
                         lastControlValues.setUnchecked (i, curValue);
                     }
                 }

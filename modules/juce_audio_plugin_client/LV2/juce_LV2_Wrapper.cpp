@@ -91,6 +91,8 @@
 
 using namespace juce;
 
+#include "juce_LV2_ParameterWrapper.cpp"
+
 /** Returns plugin type, defined in AppConfig.h or JucePluginCharacteristics.h */
 const String getPluginType()
 {
@@ -195,18 +197,6 @@ const String nameToSymbol (const String& name, const uint32 portIndex)
     return symbol;
 }
 
-/** Prevents NaN or out of 0.0<->1.0 bounds parameter values. */
-float safeParamValue (float value)
-{
-    if (std::isnan(value))
-        value = 0.0f;
-    else if (value < 0.0f)
-        value = 0.0f;
-    else if (value > 1.0f)
-        value = 1.0f;
-    return value;
-}
-
 /** Create the manifest.ttl file contents */
 const String makeManifestFile (AudioProcessor* const filter, const String& binary)
 {
@@ -216,6 +206,7 @@ const String makeManifestFile (AudioProcessor* const filter, const String& binar
     // Header
     text += "@prefix lv2:  <" LV2_CORE_PREFIX "> .\n";
     text += "@prefix pset: <" LV2_PRESETS_PREFIX "> .\n";
+    text += "@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
     text += "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n";
     text += "@prefix ui:   <" LV2_UI_PREFIX "> .\n";
     text += "\n";
@@ -283,6 +274,7 @@ const String makePluginFile (AudioProcessor* const filter, const int maxNumInput
     text += "@prefix doap: <http://usefulinc.com/ns/doap#> .\n";
     text += "@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n";
     text += "@prefix lv2:  <" LV2_CORE_PREFIX "> .\n";
+    text += "@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
     text += "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n";
     text += "@prefix ui:   <" LV2_UI_PREFIX "> .\n";
     text += "\n";
@@ -415,6 +407,7 @@ const String makePluginFile (AudioProcessor* const filter, const int maxNumInput
     }
 
     // Parameters
+    OwnedArray<Lv2ParameterWrapper> parameters = wrapParameters (filter);
     for (int i=0; i < filter->getNumParameters(); ++i)
     {
         if (i == 0)
@@ -431,9 +424,34 @@ const String makePluginFile (AudioProcessor* const filter, const int maxNumInput
         else
             text += "        lv2:name \"Port " + String(i+1) + "\" ;\n";
 
-        text += "        lv2:default " + String::formatted("%f", safeParamValue(filter->getParameter(i))) + " ;\n";
-        text += "        lv2:minimum 0.0 ;\n";
-        text += "        lv2:maximum 1.0 ;\n";
+        float minValue = parameters[i]->getMinimum();
+        float maxValue = parameters[i]->getMaximum();
+        float defValue = parameters[i]->getDefault();
+
+        text += "        lv2:default " + String(defValue) + " ;\n";
+        text += "        lv2:minimum " + String(minValue) + " ;\n";
+        text += "        lv2:maximum " + String(maxValue) + " ;\n";
+
+        switch (parameters[i]->type())
+        {
+        default:
+            break;
+        case Lv2ParameterInt:
+            text += "        lv2:portProperty lv2:integer ;\n";
+            break;
+        case Lv2ParameterBool:
+            text += "        lv2:portProperty lv2:toggled ;\n";
+            break;
+        case Lv2ParameterChoice:
+        {
+            text += "        lv2:portProperty lv2:integer, lv2:enumeration ;\n";
+            Lv2ChoiceParameterWrapper *w = static_cast<Lv2ChoiceParameterWrapper *>(parameters[i]);
+            const StringArray &choices = w->parameter->choices;
+            for (int i=0; i < choices.size(); i++)
+                text += "        lv2:scalePoint [ rdfs:label \"" + choices[i] + "\" ; rdf:value " + String(i) + " ] ;\n";
+            break;
+        }
+        }
 
         if (! filter->isParameterAutomatable(i))
             text += "        lv2:portProperty <" LV2_PORT_PROPS__expensive "> ;\n";
@@ -469,6 +487,7 @@ const String makePresetsFile (AudioProcessor* const filter)
     // Presets
     const int numPrograms = filter->getNumPrograms();
     const String presetSeparator(pluginURI.contains("#") ? ":" : "#");
+    OwnedArray<Lv2ParameterWrapper> parameters = wrapParameters (filter);
 
     for (int i = 0; i < numPrograms; ++i)
     {
@@ -519,7 +538,8 @@ const String makePresetsFile (AudioProcessor* const filter)
                 preset += "    [\n";
 
             preset += "        lv2:symbol \"" + nameToSymbol(filter->getParameterID(j), j) + "\" ;\n";
-            preset += "        pset:value " + String::formatted("%f", safeParamValue(filter->getParameter(j))) + " ;\n";
+            float value = parameters[j]->getValue();
+            preset += "        pset:value " + String(value) + " ;\n";
 
             if (j+1 == filter->getNumParameters())
                 preset += "    ] ";
@@ -833,6 +853,8 @@ public:
     JuceLv2UIWrapper (AudioProcessor* filter_, LV2UI_Write_Function writeFunction_, LV2UI_Controller controller_,
                       LV2UI_Widget* widget, const LV2_Feature* const* features, bool isExternal_)
         : filter (filter_),
+          editor(nullptr),
+          isListening(false),
           writeFunction (writeFunction_),
           controller (controller_),
           isExternal (isExternal_),
@@ -846,7 +868,10 @@ public:
     {
         jassert (filter != nullptr);
 
+        parameters = wrapParameters (filter);
+
         filter->addListener(this);
+        isListening = true;
 
         if (filter->hasEditor())
         {
@@ -918,7 +943,11 @@ public:
     {
         PopupMenu::dismissAllActiveMenus();
 
-        filter->removeListener(this);
+        if (isListening)
+        {
+            filter->removeListener(this);
+            isListening = false;
+        }
 
         parentContainer = nullptr;
         externalUI = nullptr;
@@ -936,6 +965,12 @@ public:
 
     void lv2Cleanup()
     {
+        if (isListening)
+        {
+            filter->removeListener(this);
+            isListening = false;
+        }
+
         const MessageManagerLock mmLock;
 
         if (isExternal)
@@ -967,8 +1002,10 @@ public:
 
     void audioProcessorParameterChanged (AudioProcessor*, int index, float newValue)
     {
-        if (writeFunction != nullptr && controller != nullptr)
-            writeFunction (controller, index + controlPortOffset, sizeof (float), 0, &newValue);
+        if (writeFunction != nullptr && controller != nullptr) {
+            float realValue = parameters[index]->convertFrom0to1(newValue);
+            writeFunction (controller, index + controlPortOffset, sizeof (float), 0, &realValue);
+        }
     }
 
     void audioProcessorChanged (AudioProcessor*)
@@ -1018,6 +1055,12 @@ public:
         uiTouch = nullptr;
         programsHost = nullptr;
 
+        if (!isListening)
+        {
+            filter->addListener(this);
+            isListening = true;
+        }
+
         for (int i = 0; features[i] != nullptr; ++i)
         {
             if (strcmp(features[i]->URI, LV2_UI__touch) == 0)
@@ -1056,6 +1099,7 @@ public:
 private:
     AudioProcessor* const filter;
     ScopedPointer<AudioProcessorEditor> editor;
+    bool isListening;
 
     LV2UI_Write_Function writeFunction;
     LV2UI_Controller controller;
@@ -1063,6 +1107,8 @@ private:
 
     uint32 controlPortOffset;
     int lastProgramCount;
+
+    OwnedArray<Lv2ParameterWrapper> parameters;
 
     const LV2UI_Touch* uiTouch;
     const LV2_Programs_Host* programsHost;
@@ -1208,12 +1254,15 @@ public:
         portLatency = nullptr;
 #endif
 
+        parameters = wrapParameters (filter);
+
         portAudioIns.insertMultiple (0, nullptr, numInChans);
         portAudioOuts.insertMultiple (0, nullptr, numOutChans);
         portControls.insertMultiple (0, nullptr, filter->getNumParameters());
 
+        lastControlValues.ensureStorageAllocated(filter->getNumParameters());
         for (int i=0; i < filter->getNumParameters(); ++i)
-            lastControlValues.add (filter->getParameter(i));
+            lastControlValues.add (parameters[i]->getValue());
 
         curPosInfo.resetToDefault();
 
@@ -1429,7 +1478,7 @@ public:
 
                     if (lastControlValues[i] != curValue)
                     {
-                        filter->setParameterNotifyingHost (i, curValue);
+                        parameters[i]->setValue (curValue);
                         lastControlValues.setUnchecked (i, curValue);
                     }
                 }
@@ -1804,7 +1853,7 @@ public:
             // update input control ports now
             for (int i = 0; i < portControls.size(); ++i)
             {
-                float value = filter->getParameter(i);
+                float value = parameters[i]->getValue();
 
                 if (portControls[i] != nullptr)
                     *portControls[i] = value;
@@ -1953,6 +2002,8 @@ private:
     double sampleRate;
     Array<float> lastControlValues;
     AudioPlayHead::CurrentPositionInfo curPosInfo;
+
+    OwnedArray<Lv2ParameterWrapper> parameters;
 
     struct Lv2PositionData {
         int64_t  bar;

@@ -526,6 +526,7 @@ struct AttachedControlBase  : public AudioProcessorValueTreeState::Listener,
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AttachedControlBase)
 };
 
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 //==============================================================================
 struct AudioProcessorValueTreeState::SliderAttachment::Pimpl  : private AttachedControlBase,
                                                                 private Slider::Listener
@@ -749,6 +750,7 @@ AudioProcessorValueTreeState::ButtonAttachment::ButtonAttachment (AudioProcessor
 }
 
 AudioProcessorValueTreeState::ButtonAttachment::~ButtonAttachment() {}
+#endif
 
 #if JUCE_UNIT_TESTS
 

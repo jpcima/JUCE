@@ -106,7 +106,9 @@
 #endif
 
 //==============================================================================
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "processors/juce_AudioProcessorEditor.h"
+#endif
 #include "processors/juce_AudioProcessorListener.h"
 #include "processors/juce_AudioProcessorParameter.h"
 #include "processors/juce_AudioProcessorParameterGroup.h"
@@ -114,7 +116,9 @@
 #include "processors/juce_PluginDescription.h"
 #include "processors/juce_AudioPluginInstance.h"
 #include "processors/juce_AudioProcessorGraph.h"
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "processors/juce_GenericAudioProcessorEditor.h"
+#endif
 #include "format/juce_AudioPluginFormat.h"
 #include "format/juce_AudioPluginFormatManager.h"
 #include "scanning/juce_KnownPluginList.h"
@@ -124,7 +128,9 @@
 #include "format_types/juce_VSTPluginFormat.h"
 #include "format_types/juce_VST3PluginFormat.h"
 #include "scanning/juce_PluginDirectoryScanner.h"
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "scanning/juce_PluginListComponent.h"
+#endif
 #include "utilities/juce_AudioProcessorParameterWithID.h"
 #include "utilities/juce_RangedAudioParameter.h"
 #include "utilities/juce_AudioParameterFloat.h"

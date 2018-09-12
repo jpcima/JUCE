@@ -40,7 +40,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 //==============================================================================
-#if JUCE_MAC
+#if JUCE_MAC && ! JUCE_AUDIOPROCESSOR_NO_GUI
  #if JUCE_SUPPORT_CARBON \
       && ((JUCE_PLUGINHOST_VST || JUCE_PLUGINHOST_AU) \
            || ! (defined (MAC_OS_X_VERSION_10_6) && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_6))
@@ -49,7 +49,7 @@
  #endif
 #endif
 
-#if JUCE_PLUGINHOST_VST && JUCE_LINUX
+#if JUCE_PLUGINHOST_VST && JUCE_LINUX && ! JUCE_AUDIOPROCESSOR_NO_GUI
  #include <X11/Xlib.h>
  #include <X11/Xutil.h>
  #undef KeyPress
@@ -156,9 +156,13 @@ struct AutoResizingNSViewComponentWithParent  : public AutoResizingNSViewCompone
 #include "format_types/juce_LegacyAudioParameter.cpp"
 #include "processors/juce_AudioProcessor.cpp"
 #include "processors/juce_AudioPluginInstance.cpp"
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "processors/juce_AudioProcessorEditor.cpp"
+#endif
 #include "processors/juce_AudioProcessorGraph.cpp"
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "processors/juce_GenericAudioProcessorEditor.cpp"
+#endif
 #include "processors/juce_PluginDescription.cpp"
 #include "format_types/juce_LADSPAPluginFormat.cpp"
 #include "format_types/juce_VSTPluginFormat.cpp"
@@ -166,7 +170,9 @@ struct AutoResizingNSViewComponentWithParent  : public AutoResizingNSViewCompone
 #include "format_types/juce_AudioUnitPluginFormat.mm"
 #include "scanning/juce_KnownPluginList.cpp"
 #include "scanning/juce_PluginDirectoryScanner.cpp"
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 #include "scanning/juce_PluginListComponent.cpp"
+#endif
 #include "utilities/juce_AudioProcessorParameters.cpp"
 #include "processors/juce_AudioProcessorParameterGroup.cpp"
 #include "utilities/juce_AudioProcessorValueTreeState.cpp"

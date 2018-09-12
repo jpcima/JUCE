@@ -144,6 +144,7 @@ public:
         sortByInfoUpdateTime
     };
 
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
     //==============================================================================
     /** Adds all the plugin types to a popup menu so that the user can select one.
 
@@ -160,6 +161,7 @@ public:
         @see addToMenu
     */
     int getIndexChosenByMenu (int menuResultCode) const;
+#endif
 
     //==============================================================================
     /** Sorts the list. */

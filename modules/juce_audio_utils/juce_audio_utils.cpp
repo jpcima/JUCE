@@ -54,12 +54,16 @@
  #endif
 #endif
 
+#if JUCE_AUDIOPROCESSOR_NO_GUI
 #include "gui/juce_AudioDeviceSelectorComponent.cpp"
+#endif
 #include "gui/juce_AudioThumbnail.cpp"
 #include "gui/juce_AudioThumbnailCache.cpp"
+#if JUCE_AUDIOPROCESSOR_NO_GUI
 #include "gui/juce_AudioVisualiserComponent.cpp"
 #include "gui/juce_MidiKeyboardComponent.cpp"
 #include "gui/juce_AudioAppComponent.cpp"
+#endif
 #include "players/juce_SoundPlayer.cpp"
 #include "players/juce_AudioProcessorPlayer.cpp"
 #include "audio_cd/juce_AudioCDReader.cpp"

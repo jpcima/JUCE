@@ -544,6 +544,7 @@ KnownPluginList::PluginTree* KnownPluginList::createTree (const SortMethod sortM
     return tree;
 }
 
+#if ! JUCE_AUDIOPROCESSOR_NO_GUI
 //==============================================================================
 void KnownPluginList::addToMenu (PopupMenu& menu, const SortMethod sortMethod,
                                  const String& currentlyTickedPluginID) const
@@ -557,6 +558,7 @@ int KnownPluginList::getIndexChosenByMenu (const int menuResultCode) const
     const int i = menuResultCode - PluginTreeUtils::menuIdBase;
     return isPositiveAndBelow (i, types.size()) ? i : -1;
 }
+#endif
 
 //==============================================================================
 KnownPluginList::CustomScanner::CustomScanner() {}

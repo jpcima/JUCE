@@ -167,8 +167,9 @@ static Lv2ParameterWrapper *createParameterWrapper (AudioProcessor* filter, int 
 static OwnedArray<Lv2ParameterWrapper> wrapParameters (AudioProcessor* filter)
 {
     OwnedArray<Lv2ParameterWrapper> parameters;
-    parameters.ensureStorageAllocated(filter->getNumParameters());
-    for (int i=0; i < filter->getNumParameters(); ++i)
+    int numParameters = filter->getParameters().size();
+    parameters.ensureStorageAllocated(numParameters);
+    for (int i=0; i < numParameters; ++i)
         parameters.add (createParameterWrapper (filter, i));
     return parameters;
 }

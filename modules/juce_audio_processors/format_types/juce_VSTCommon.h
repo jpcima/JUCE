@@ -27,6 +27,10 @@
 namespace juce
 {
 
+#if !defined(JucePlugin_VST2SDK)
+ #define JucePlugin_VST2SDK 0
+#endif
+
 //==============================================================================
 #if JUCE_BIG_ENDIAN
  #define JUCE_MULTICHAR_CONSTANT(a, b, c, d) (a | (((uint32) b) << 8) | (((uint32) c) << 16) | (((uint32) d) << 24))
@@ -64,6 +68,7 @@ struct SpeakerMappings  : private AudioChannelSet // (inheritance only to give e
         }
     };
 
+#if JucePlugin_VST2SDK
     static AudioChannelSet vstArrangementTypeToChannelSet (int32 arr, int fallbackNumChannels)
     {
         if      (arr == Vst2::kSpeakerArrEmpty)        return AudioChannelSet::disabled();
@@ -307,6 +312,7 @@ struct SpeakerMappings  : private AudioChannelSet // (inheritance only to give e
 
         return AudioChannelSet::unknown;
     }
+#endif
 };
 
 } // namespace juce

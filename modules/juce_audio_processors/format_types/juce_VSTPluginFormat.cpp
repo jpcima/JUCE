@@ -26,6 +26,10 @@
 
 #if JUCE_PLUGINHOST_VST
 
+#if !defined(JucePlugin_VST2SDK)
+ #define JucePlugin_VST2SDK 0
+#endif
+
 //==============================================================================
 #undef PRAGMA_ALIGN_SUPPORTED
 
@@ -53,6 +57,7 @@
 
 namespace Vst2
 {
+#if JucePlugin_VST2SDK
 // If the following files cannot be found then you are probably trying to host
 // VST2 plug-ins. To do this you must have a VST2 SDK in your header search
 // paths or use the "VST (Legacy) SDK Folder" field in the Projucer. The VST2
@@ -60,6 +65,9 @@ namespace Vst2
 // SDK or JUCE version 5.3.2.
 #include <pluginterfaces/vst2.x/aeffect.h>
 #include <pluginterfaces/vst2.x/aeffectx.h>
+#else
+#include "../../juce_audio_plugin_client/VST/VeSTige.h"
+#endif
 }
 
 #include "juce_VSTCommon.h"
@@ -935,7 +943,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
             if (valueType != nullptr || ! vstValueStrings.isEmpty())
                 return getText (getValue(), 1024);
 
-            return pluginInstance.getTextForOpcode (getParameterIndex(), Vst2::effGetParamDisplay);
+            return pluginInstance.getTextForOpcode (getParameterIndex(), 7);
         }
 
         float getDefaultValue() const override
@@ -966,8 +974,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         String getLabel() const override
         {
-            return label.isEmpty() ? pluginInstance.getTextForOpcode (getParameterIndex(),
-                                                                      Vst2::effGetParamLabel)
+            return label.isEmpty() ? pluginInstance.getTextForOpcode (getParameterIndex(), 6)
                                    : label;
         }
 
@@ -1038,7 +1045,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
             Array<String> shortParamNames;
             float defaultValue = 0;
             String label;
-            bool isAutomatable = dispatch (Vst2::effCanBeAutomated, i, 0, nullptr, 0) != 0;
+            bool isAutomatable = dispatch (26, i, 0, nullptr, 0) != 0;
             bool isDiscrete = false;
             int numSteps = AudioProcessor::getDefaultNumParameterSteps();
             bool isBoolSwitch = false;
@@ -1166,7 +1173,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
         {
             newEffect->resvd2 = 0;
 
-            newEffect->dispatcher (newEffect, Vst2::effIdentify, 0, 0, nullptr, 0);
+            newEffect->dispatcher (newEffect, 22, 0, 0, nullptr, 0);
 
             auto blockSize = jmax (32, initialBlockSize);
 
@@ -1246,7 +1253,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         setRateAndBufferSizeDetails (initialSampleRate, initialBlockSize);
 
-        dispatch (Vst2::effIdentify, 0, 0, nullptr, 0);
+        dispatch (22, 0, 0, nullptr, 0);
 
         if (getSampleRate() > 0)
             dispatch (Vst2::effSetSampleRate, 0, 0, nullptr, (float) getSampleRate());
@@ -1313,10 +1320,10 @@ struct VSTPluginInstance     : public AudioPluginInstance,
         if (vstEffect == nullptr)
             return 0.0;
 
-        if ((vstEffect->flags & Vst2::effFlagsNoSoundInStop) != 0)
+        if ((vstEffect->flags & (1 << 9)) != 0)
             return 0.0;
 
-        auto tailSize = dispatch (Vst2::effGetTailSize, 0, 0, nullptr, 0);
+        auto tailSize = dispatch (52, 0, 0, nullptr, 0);
         auto sampleRate = getSampleRate();
 
         // remain backward compatible with old JUCE plug-ins: anything larger
@@ -1348,6 +1355,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         setRateAndBufferSizeDetails (rate, samplesPerBlockExpected);
 
+#if JucePlugin_VST2SDK
         if (numInputBuses <= 1 && numOutputBuses <= 1)
         {
             SpeakerMappings::VstSpeakerConfigurationHolder inArr  (getChannelLayoutOfBus (true,  0));
@@ -1355,6 +1363,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
             dispatch (Vst2::effSetSpeakerArrangement, 0, (pointer_sized_int) &inArr.get(), (void*) &outArr.get(), 0.0f);
         }
+#endif
 
         vstHostTime.tempo = 120.0;
         vstHostTime.timeSigNumerator = 4;
@@ -1586,7 +1595,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
             {
                 char nm[264] = { 0 };
 
-                if (dispatch (Vst2::effGetProgramNameIndexed, jlimit (0, getNumPrograms(), index), -1, nm, 0) != 0)
+                if (dispatch (29, jlimit (0, getNumPrograms(), index), -1, nm, 0) != 0)
                     return String::fromUTF8 (nm).trim();
             }
         }
@@ -1599,7 +1608,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
         if (index >= 0 && index == getCurrentProgram())
         {
             if (getNumPrograms() > 0 && newName != getCurrentProgramName())
-                dispatch (Vst2::effSetProgramName, 0, 0, (void*) newName.substring (0, 24).toRawUTF8(), 0.0f);
+                dispatch (4, 0, 0, (void*) newName.substring (0, 24).toRawUTF8(), 0.0f);
         }
         else
         {
@@ -1954,14 +1963,14 @@ struct VSTPluginInstance     : public AudioPluginInstance,
         return true;
     }
 
-    bool usesChunks() const noexcept        { return vstEffect != nullptr && (vstEffect->flags & Vst2::effFlagsProgramChunks) != 0; }
+    bool usesChunks() const noexcept        { return vstEffect != nullptr && (vstEffect->flags & (1 << 5)) != 0; }
 
     bool getChunkData (MemoryBlock& mb, bool isPreset, int maxSizeMB) const
     {
         if (usesChunks())
         {
             void* data = nullptr;
-            auto bytes = (size_t) dispatch (Vst2::effGetChunk, isPreset ? 1 : 0, 0, &data, 0.0f);
+            auto bytes = (size_t) dispatch (23, isPreset ? 1 : 0, 0, &data, 0.0f);
 
             if (data != nullptr && bytes <= (size_t) maxSizeMB * 1024 * 1024)
             {
@@ -1979,7 +1988,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
     {
         if (size > 0 && usesChunks())
         {
-            dispatch (Vst2::effSetChunk, isPreset ? 1 : 0, size, (void*) data, 0.0f);
+            dispatch (24, isPreset ? 1 : 0, size, (void*) data, 0.0f);
 
             if (! isPreset)
                 updateStoredProgramNames();
@@ -2013,7 +2022,7 @@ private:
             currentValue = (newValue != 0.0f);
 
             if (parent.vstSupportsBypass)
-                parent.dispatch (Vst2::effSetBypass, 0, currentValue ? 1 : 0, nullptr, 0.0f);
+                parent.dispatch (44, 0, currentValue ? 1 : 0, nullptr, 0.0f);
         }
 
         float getValueForText (const String& text) const override
@@ -2200,6 +2209,7 @@ private:
         if (effect->numInputs == 0 && effect->numOutputs == 0)
             return returnValue;
 
+#if JucePlugin_VST2SDK
         // Workaround for old broken JUCE plug-ins which would return an invalid
         // speaker arrangement if the host didn't ask for a specific arrangement
         // beforehand.
@@ -2222,18 +2232,24 @@ private:
 
         if (! getSpeakerArrangementWrapper (effect, inArr, outArr))
             inArr = outArr = nullptr;
+#endif
 
         for (int dir = 0; dir < 2; ++dir)
         {
             const bool isInput = (dir == 0);
             const int opcode = (isInput ? Vst2::effGetInputProperties : Vst2::effGetOutputProperties);
             const int maxChannels = (isInput ? effect->numInputs : effect->numOutputs);
+#if JucePlugin_VST2SDK
             const Vst2::VstSpeakerArrangement* arr = (isInput ? inArr : outArr);
+#endif
             bool busAdded = false;
 
+#if JucePlugin_VST2SDK
             Vst2::VstPinProperties pinProps;
+#endif
             AudioChannelSet layout;
 
+#if JucePlugin_VST2SDK
             for (int ch = 0; ch < maxChannels; ch += layout.size())
             {
                 if (effect->dispatcher (effect, opcode, ch, 0, &pinProps, 0.0f) == 0)
@@ -2256,18 +2272,21 @@ private:
                 busAdded = true;
                 returnValue.addBus (isInput, pinProps.label, layout, true);
             }
+#endif
 
             // no buses?
             if (! busAdded && maxChannels > 0)
             {
                 String busName = (isInput ? "Input" : "Output");
 
+#if JucePlugin_VST2SDK
                 if (effect->dispatcher (effect, opcode, 0, 0, &pinProps, 0.0f) != 0)
                     busName = pinProps.label;
 
                 if (arr != nullptr)
                     layout = SpeakerMappings::vstArrangementTypeToChannelSet (*arr);
                 else
+#endif
                     layout = AudioChannelSet::canonicalChannelSet (maxChannels);
 
                 returnValue.addBus (isInput, busName, layout, true);
@@ -2583,7 +2602,7 @@ private:
             char nm[256] = { 0 };
 
             // only do this if the plugin can't use indexed names..
-            if (dispatch (Vst2::effGetProgramNameIndexed, 0, -1, nm, 0) == 0)
+            if (dispatch (29, 0, -1, nm, 0) == 0)
             {
                 auto oldProgram = getCurrentProgram();
                 MemoryBlock oldSettings;
@@ -2960,7 +2979,7 @@ public:
         nativeScaleFactor = (float) newScaleFactor;
 
         if (pluginRespondsToDPIChanges)
-            dispatch (Vst2::effVendorSpecific,
+            dispatch (50,
                       JUCE_MULTICHAR_CONSTANT ('P', 'r', 'e', 'S'),
                       JUCE_MULTICHAR_CONSTANT ('A', 'e', 'C', 's'),
                       nullptr, nativeScaleFactor);
@@ -3079,7 +3098,7 @@ private:
         dispatch (Vst2::effGetProgram, 0, 0, nullptr, 0); // also in steinberg code
 
         // Install keyboard hooks
-        pluginWantsKeys = (dispatch (Vst2::effKeysRequired, 0, 0, nullptr, 0) == 0);
+        pluginWantsKeys = (dispatch (57, 0, 0, nullptr, 0) == 0);
 
         // double-check it's not too tiny
         int w = 250, h = 150;
@@ -3145,7 +3164,7 @@ private:
         dispatch (Vst2::effGetProgram, 0, 0, nullptr, 0); // also in steinberg code
 
         // Install keyboard hooks
-        pluginWantsKeys = (dispatch (Vst2::effKeysRequired, 0, 0, nullptr, 0) == 0);
+        pluginWantsKeys = (dispatch (57, 0, 0, nullptr, 0) == 0);
 
        #if JUCE_WINDOWS
         originalWndProc = 0;

@@ -26,6 +26,10 @@
 
 #if JUCE_PLUGINHOST_VST
 
+#if !defined(JucePlugin_VST2SDK)
+ #define JucePlugin_VST2SDK 0
+#endif
+
 //==============================================================================
 #undef PRAGMA_ALIGN_SUPPORTED
 
@@ -41,6 +45,7 @@
 
 namespace Vst2
 {
+#if JucePlugin_VST2SDK
 // If the following files cannot be found then you are probably trying to host
 // VST2 plug-ins. To do this you must have a VST2 SDK in your header search
 // paths or use the "VST (Legacy) SDK Folder" field in the Projucer. The VST2
@@ -48,6 +53,9 @@ namespace Vst2
 // SDK or JUCE version 5.3.2.
 #include <pluginterfaces/vst2.x/aeffect.h>
 #include <pluginterfaces/vst2.x/aeffectx.h>
+#else
+#include "../../juce_audio_plugin_client/VST/VeSTige.h"
+#endif
 }
 
 #include "juce_VSTCommon.h"
@@ -1325,6 +1333,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         setRateAndBufferSizeDetails (rate, samplesPerBlockExpected);
 
+#if JucePlugin_VST2SDK
         if (numInputBuses <= 1 && numOutputBuses <= 1)
         {
             SpeakerMappings::VstSpeakerConfigurationHolder inArr  (getChannelLayoutOfBus (true,  0));
@@ -1332,6 +1341,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
             dispatch (Vst2::effSetSpeakerArrangement, 0, (pointer_sized_int) &inArr.get(), (void*) &outArr.get(), 0.0f);
         }
+#endif
 
         vstHostTime.tempo = 120.0;
         vstHostTime.timeSigNumerator = 4;
@@ -2177,6 +2187,7 @@ private:
         if (effect->numInputs == 0 && effect->numOutputs == 0)
             return returnValue;
 
+#if JucePlugin_VST2SDK
         // Workaround for old broken JUCE plug-ins which would return an invalid
         // speaker arrangement if the host didn't ask for a specific arrangement
         // beforehand.
@@ -2199,18 +2210,24 @@ private:
 
         if (! getSpeakerArrangementWrapper (effect, inArr, outArr))
             inArr = outArr = nullptr;
+#endif
 
         for (int dir = 0; dir < 2; ++dir)
         {
             const bool isInput = (dir == 0);
             const int opcode = (isInput ? Vst2::effGetInputProperties : Vst2::effGetOutputProperties);
             const int maxChannels = (isInput ? effect->numInputs : effect->numOutputs);
+#if JucePlugin_VST2SDK
             const Vst2::VstSpeakerArrangement* arr = (isInput ? inArr : outArr);
+#endif
             bool busAdded = false;
 
+#if JucePlugin_VST2SDK
             Vst2::VstPinProperties pinProps;
+#endif
             AudioChannelSet layout;
 
+#if JucePlugin_VST2SDK
             for (int ch = 0; ch < maxChannels; ch += layout.size())
             {
                 if (effect->dispatcher (effect, opcode, ch, 0, &pinProps, 0.0f) == 0)
@@ -2233,18 +2250,21 @@ private:
                 busAdded = true;
                 returnValue.addBus (isInput, pinProps.label, layout, true);
             }
+#endif
 
             // no buses?
             if (! busAdded && maxChannels > 0)
             {
                 String busName = (isInput ? "Input" : "Output");
 
+#if JucePlugin_VST2SDK
                 if (effect->dispatcher (effect, opcode, 0, 0, &pinProps, 0.0f) != 0)
                     busName = pinProps.label;
 
                 if (arr != nullptr)
                     layout = SpeakerMappings::vstArrangementTypeToChannelSet (*arr);
                 else
+#endif
                     layout = AudioChannelSet::canonicalChannelSet (maxChannels);
 
                 returnValue.addBus (isInput, busName, layout, true);

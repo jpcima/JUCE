@@ -29,6 +29,10 @@
 
 #if JucePlugin_Build_VST
 
+#if !defined(JucePlugin_VST2SDK)
+ #define JucePlugin_VST2SDK 0
+#endif
+
 #ifdef _MSC_VER
  #pragma warning (disable : 4996 4100)
 #endif
@@ -86,6 +90,7 @@
 
 namespace Vst2
 {
+#if JucePlugin_VST2SDK
 // If the following files cannot be found then you are probably trying to build
 // a VST2 plug-in or a VST2-compatible VST3 plug-in. To do this you must have a
 // VST2 SDK in your header search paths or use the "VST (Legacy) SDK Folder"
@@ -94,6 +99,42 @@ namespace Vst2
 // also need a VST2 license from Steinberg to distribute VST2 plug-ins.
 #include "pluginterfaces/vst2.x/aeffect.h"
 #include "pluginterfaces/vst2.x/aeffectx.h"
+#else
+#include "VeSTige.h"
+//from DPF
+enum
+{
+    effFlagsProgramChunks = (1 << 5),
+    effSetProgramName = 4,
+    effGetParamLabel = 6,
+    effGetParamDisplay = 7,
+    effGetChunk = 23,
+    effSetChunk = 24,
+    effCanBeAutomated = 26,
+    effGetProgramNameIndexed = 29,
+    effEditKeyDown = 59,
+    effEditKeyUp = 60,
+};
+#define kVstVersion 2400
+struct ERect
+{
+    int16_t top, left, bottom, right;
+};
+//other
+enum
+{
+    effIdentify = 22,
+    effString2Parameter = 27,
+    effSetBypass = 44,
+    effVendorSpecific = 50,
+    effGetTailSize = 52,
+    effKeysRequired = 57,
+    effGetCurrentMidiProgram = 63,
+    effSetTotalSampleToProcess = 73,
+    effGetNumMidiInputChannels = 78,
+    effGetNumMidiOutputChannels = 79,
+};
+#endif
 }
 
 using namespace juce;
@@ -334,10 +375,10 @@ public:
 
         memset (&vstEffect, 0, sizeof (vstEffect));
         vstEffect.magic = 0x56737450 /* 'VstP' */;
-        vstEffect.dispatcher = (Vst2::AEffectDispatcherProc) dispatcherCB;
+        vstEffect.dispatcher = (decltype(Vst2::AEffect::dispatcher)) dispatcherCB;
         vstEffect.process = nullptr;
-        vstEffect.setParameter = (Vst2::AEffectSetParameterProc) setParameterCB;
-        vstEffect.getParameter = (Vst2::AEffectGetParameterProc) getParameterCB;
+        vstEffect.setParameter = (decltype(Vst2::AEffect::setParameter)) setParameterCB;
+        vstEffect.getParameter = (decltype(Vst2::AEffect::getParameter)) getParameterCB;
         vstEffect.numPrograms = jmax (1, af->getNumPrograms());
         vstEffect.numParams = juceParameters.getNumParameters();
         vstEffect.numInputs = maxNumInChannels;
@@ -352,14 +393,18 @@ public:
         vstEffect.version = JucePlugin_VersionCode;
        #endif
 
-        vstEffect.processReplacing = (Vst2::AEffectProcessProc) processReplacingCB;
+        vstEffect.processReplacing = (decltype(Vst2::AEffect::processReplacing)) processReplacingCB;
+#if JucePlugin_VST2SDK
         vstEffect.processDoubleReplacing = (Vst2::AEffectProcessDoubleProc) processDoubleReplacingCB;
+#endif
 
         vstEffect.flags |= Vst2::effFlagsHasEditor;
 
         vstEffect.flags |= Vst2::effFlagsCanReplacing;
+#if JucePlugin_VST2SDK
         if (processor->supportsDoublePrecisionProcessing())
             vstEffect.flags |= Vst2::effFlagsCanDoubleReplacing;
+#endif
 
         vstEffect.flags |= Vst2::effFlagsProgramChunks;
 
@@ -705,6 +750,7 @@ public:
         info.ppqPosition = (ti->flags & Vst2::kVstPpqPosValid) != 0 ? ti->ppqPos : 0.0;
         info.ppqPositionOfLastBarStart = (ti->flags & Vst2::kVstBarsValid) != 0 ? ti->barStartPos : 0.0;
 
+#if JucePlugin_VST2SDK
         if ((ti->flags & Vst2::kVstSmpteValid) != 0)
         {
             AudioPlayHead::FrameRateType rate = AudioPlayHead::fpsUnknown;
@@ -734,6 +780,7 @@ public:
             info.editOriginTime = ti->smpteOffset / (80.0 * fps);
         }
         else
+#endif
         {
             info.frameRate = AudioPlayHead::fpsUnknown;
             info.editOriginTime = 0;
@@ -835,6 +882,7 @@ public:
             hostCallback (&vstEffect, Vst2::audioMasterIOChanged, 0, 0, 0, 0);
     }
 
+#if JucePlugin_VST2SDK
     bool getPinProperties (Vst2::VstPinProperties& properties, bool direction, int index) const
     {
         if (processor->isMidiEffect())
@@ -883,6 +931,7 @@ public:
 
         return false;
     }
+#endif
 
     //==============================================================================
     struct SpeakerMappings  : private AudioChannelSet // (inheritance only to give easier access to items in the namespace)
@@ -909,6 +958,7 @@ public:
             }
         };
 
+#if JucePlugin_VST2SDK
         static AudioChannelSet vstArrangementTypeToChannelSet (const Vst2::VstSpeakerArrangement& arr)
         {
             if (arr.type == Vst2::kSpeakerArrEmpty)      return AudioChannelSet::disabled();
@@ -1087,6 +1137,7 @@ public:
 
             return AudioChannelSet::unknown;
         }
+#endif
     };
 
     void timerCallback() override
@@ -1195,10 +1246,14 @@ public:
             case Vst2::effCanBeAutomated:           return handleIsParameterAutomatable (args);
             case Vst2::effString2Parameter:         return handleParameterValueForText (args);
             case Vst2::effGetProgramNameIndexed:    return handleGetProgramName (args);
+#if JucePlugin_VST2SDK
             case Vst2::effGetInputProperties:       return handleGetInputPinProperties (args);
             case Vst2::effGetOutputProperties:      return handleGetOutputPinProperties (args);
+#endif
             case Vst2::effGetPlugCategory:          return handleGetPlugInCategory (args);
+#if JucePlugin_VST2SDK
             case Vst2::effSetSpeakerArrangement:    return handleSetSpeakerConfiguration (args);
+#endif
             case Vst2::effSetBypass:                return handleSetBypass (args);
             case Vst2::effGetEffectName:            return handleGetPlugInName (args);
             case Vst2::effGetProductString:         return handleGetPlugInName (args);
@@ -1210,9 +1265,13 @@ public:
             case Vst2::effKeysRequired:             return handleKeyboardFocusRequired (args);
             case Vst2::effGetVstVersion:            return handleGetVstInterfaceVersion (args);
             case Vst2::effGetCurrentMidiProgram:    return handleGetCurrentMidiProgram (args);
+#if JucePlugin_VST2SDK
             case Vst2::effGetSpeakerArrangement:    return handleGetSpeakerConfiguration (args);
+#endif
             case Vst2::effSetTotalSampleToProcess:  return handleSetNumberOfSamplesToProcess (args);
+#if JucePlugin_VST2SDK
             case Vst2::effSetProcessPrecision:      return handleSetSampleFloatType (args);
+#endif
             case Vst2::effGetNumMidiInputChannels:  return handleGetNumMidiInputChannels();
             case Vst2::effGetNumMidiOutputChannels: return handleGetNumMidiOutputChannels();
             default:                                return 0;
@@ -1925,6 +1984,7 @@ private:
         return 0;
     }
 
+#if JucePlugin_VST2SDK
     pointer_sized_int handleGetInputPinProperties (VstOpCodeArguments args)
     {
         return (processor != nullptr && getPinProperties (*(Vst2::VstPinProperties*) args.ptr, true, args.index)) ? 1 : 0;
@@ -1934,12 +1994,14 @@ private:
     {
         return (processor != nullptr && getPinProperties (*(Vst2::VstPinProperties*) args.ptr, false, args.index)) ? 1 : 0;
     }
+#endif
 
     pointer_sized_int handleGetPlugInCategory (VstOpCodeArguments)
     {
         return Vst2::JucePlugin_VSTCategory;
     }
 
+#if JucePlugin_VST2SDK
     pointer_sized_int handleSetSpeakerConfiguration (VstOpCodeArguments args)
     {
         auto* pluginInput  = reinterpret_cast<Vst2::VstSpeakerArrangement*> (args.value);
@@ -1987,6 +2049,7 @@ private:
 
         return processor->setBusesLayout (layouts) ? 1 : 0;
     }
+#endif
 
     pointer_sized_int handleSetBypass (VstOpCodeArguments args)
     {
@@ -2127,6 +2190,7 @@ private:
         return -1;
     }
 
+#if JucePlugin_VST2SDK
     pointer_sized_int handleGetSpeakerConfiguration (VstOpCodeArguments args)
     {
         auto** pluginInput  = reinterpret_cast<Vst2::VstSpeakerArrangement**> (args.value);
@@ -2151,12 +2215,14 @@ private:
 
         return 1;
     }
+#endif
 
     pointer_sized_int handleSetNumberOfSamplesToProcess (VstOpCodeArguments args)
     {
         return args.value;
     }
 
+#if JucePlugin_VST2SDK
     pointer_sized_int handleSetSampleFloatType (VstOpCodeArguments args)
     {
         if (! isProcessing)
@@ -2174,6 +2240,7 @@ private:
 
         return 0;
     }
+#endif
 
     pointer_sized_int handleSetContentScaleFactor (float scale)
     {
@@ -2268,7 +2335,9 @@ private:
     VstTempBuffers<double> doubleTempBuffers;
     int maxNumInChannels = 0, maxNumOutChannels = 0;
 
+#if JucePlugin_VST2SDK
     HeapBlock<Vst2::VstSpeakerArrangement> cachedInArrangement, cachedOutArrangement;
+#endif
 
     ThreadLocalValue<bool> inParameterChangedCallback;
 

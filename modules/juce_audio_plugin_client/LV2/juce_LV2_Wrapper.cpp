@@ -11,6 +11,11 @@
 
 #if JucePlugin_Build_LV2
 
+/** Use parameters */
+#ifndef JucePlugin_UseLV2Parameters
+ #define JucePlugin_UseLV2Parameters 1
+#endif
+
 /** Enable latency port */
 #ifndef JucePlugin_WantsLV2Latency
  #define JucePlugin_WantsLV2Latency 1
@@ -60,6 +65,7 @@
 #include "includes/time.h"
 #include "includes/ui.h"
 #include "includes/urid.h"
+#include "includes/patch.h"
 #include "includes/lv2_external_ui.h"
 #include "includes/lv2_programs.h"
 

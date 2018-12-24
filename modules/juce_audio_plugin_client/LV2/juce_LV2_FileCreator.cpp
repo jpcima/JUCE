@@ -10,6 +10,11 @@
 
 #include <cctype>
 
+/** Use parameters */
+#ifndef JucePlugin_UseLV2Parameters
+ #define JucePlugin_UseLV2Parameters 1
+#endif
+
 /** Plugin requires processing with a fixed/constant block size */
 #ifndef JucePlugin_WantsLV2FixedBlockSize
 #define JucePlugin_WantsLV2FixedBlockSize 0
@@ -224,14 +229,85 @@ class JuceLV2FileCreator
         String text;
 
         // Header
-        text += "@prefix atom: <" LV2_ATOM_PREFIX "> .\n";
-        text += "@prefix doap: <http://usefulinc.com/ns/doap#> .\n";
-        text += "@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n";
-        text += "@prefix lv2:  <" LV2_CORE_PREFIX "> .\n";
-        text += "@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
-        text += "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n";
-        text += "@prefix ui:   <" LV2_UI_PREFIX "> .\n";
+        text += "@prefix atom:   <" LV2_ATOM_PREFIX "> .\n";
+        text += "@prefix doap:   <http://usefulinc.com/ns/doap#> .\n";
+        text += "@prefix foaf:   <http://xmlns.com/foaf/0.1/> .\n";
+        text += "@prefix lv2:    <" LV2_CORE_PREFIX "> .\n";
+        text += "@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
+        text += "@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .\n";
+        text += "@prefix ui:     <" LV2_UI_PREFIX "> .\n";
+        text += "@prefix patch:  <http://lv2plug.in/ns/ext/patch#> .\n";
+        text += "@prefix pprops: <http://lv2plug.in/ns/ext/port-props#> .\n";
         text += "\n";
+
+        OwnedArray<Lv2ParameterWrapper> parameters = wrapParameters (filter);
+        const OwnedArray<AudioProcessorParameter> &rawParams = filter->getParameters();
+
+#if JucePlugin_UseLV2Parameters
+        text += "@prefix propex: <" + pluginURI + "#Control-> .\n";
+        text += "\n";
+
+        for (int i=0; i < parameters.size(); ++i)
+        {
+            String paramID;
+            if (AudioProcessorParameterWithID *p = dynamic_cast<AudioProcessorParameterWithID *>(rawParams[i]))
+                paramID = p->paramID;
+            else
+                paramID = "parameter" + String(i+1);
+
+            text += "propex:" + paramID + "\n";
+
+            String const paramName = rawParams[i]->getName(parameterNameMaxLength);
+            if (paramName.isNotEmpty())
+                text += "    rdfs:label \"" + paramName + "\" ;\n";
+            else
+                text += "    rdfs:label \"Parameter " + String(i+1) + "\" ;\n";
+
+            float minValue = parameters[i]->getMinimum();
+            float maxValue = parameters[i]->getMaximum();
+            float defValue = parameters[i]->getDefault();
+
+            text += "    lv2:default " + String(defValue) + " ;\n";
+            text += "    lv2:minimum " + String(minValue) + " ;\n";
+            text += "    lv2:maximum " + String(maxValue) + " ;\n";
+
+            switch (parameters[i]->type())
+            {
+            default:
+                break;
+            case Lv2ParameterFloat:
+                text += "    rdfs:range atom:Float ;\n";
+                break;
+            case Lv2ParameterInt:
+                text += "    rdfs:range atom:Int ;\n";
+                text += "    lv2:portProperty lv2:integer ;\n";
+                break;
+            case Lv2ParameterBool:
+                text += "    rdfs:range atom:Bool ;\n";
+                text += "    lv2:portProperty lv2:toggled ;\n";
+                break;
+            case Lv2ParameterChoice:
+            {
+                text += "    rdfs:range atom:Int ;\n";
+                text += "    lv2:portProperty lv2:integer, lv2:enumeration ;\n";
+                Lv2ChoiceParameterWrapper *w = static_cast<Lv2ChoiceParameterWrapper *>(parameters[i]);
+                const StringArray &choices = w->parameter->choices;
+                for (int i=0; i < choices.size(); i++)
+                    text += "    lv2:scalePoint [ rdfs:label \"" + choices[i] + "\" ; rdf:value " + String(i) + " ] ;\n";
+                break;
+            }
+            }
+
+            if (! rawParams[i]->isAutomatable()) {
+                text += "    lv2:portProperty pprops:expensive ;\n";
+                text += "    lv2:portProperty pprops:notAutomatic ;\n";
+            }
+
+            jassert(text.endsWith(";\n"));
+            text = text.dropLastCharacters(2);
+            text += ".\n\n";
+        }
+#endif
 
         // Plugin
         text += "<" + pluginURI + ">\n";
@@ -258,9 +334,23 @@ class JuceLV2FileCreator
         }
 #endif
 
+#if JucePlugin_UseLV2Parameters
+        for (int i=0; i < parameters.size(); ++i)
+        {
+            String paramID;
+            if (AudioProcessorParameterWithID *p = dynamic_cast<AudioProcessorParameterWithID *>(rawParams[i]))
+                paramID = p->paramID;
+            else
+                paramID = "parameter" + String(i+1);
+
+            text += "    patch:writable propex:" + paramID + ";\n";
+        }
+        text += "\n";
+#endif
+
         uint32 portIndex = 0;
 
-#if (JucePlugin_WantsMidiInput || JucePlugin_WantsLV2TimePos)
+#if (JucePlugin_WantsMidiInput || JucePlugin_WantsLV2TimePos || JucePlugin_UseLV2Parameters)
         // MIDI input
         text += "    lv2:port [\n";
         text += "        a lv2:InputPort, atom:AtomPort ;\n";
@@ -270,6 +360,10 @@ class JuceLV2FileCreator
 #endif
 #if JucePlugin_WantsLV2TimePos
         text += "        atom:supports <" LV2_TIME__Position "> ;\n";
+#endif
+#if JucePlugin_UseLV2Parameters
+        text += "        atom:supports atom:Object  ;\n";
+        text += "        atom:supports patch:Message ;\n";
 #endif
         text += "        lv2:index " + String(portIndex++) + " ;\n";
         text += "        lv2:symbol \"lv2_events_in\" ;\n";
@@ -304,8 +398,8 @@ class JuceLV2FileCreator
         text += "        lv2:default 0.0 ;\n";
         text += "        lv2:minimum 0.0 ;\n";
         text += "        lv2:maximum 1.0 ;\n";
-        text += "        lv2:designation <" LV2_CORE__freeWheeling "> ;\n";
-        text += "        lv2:portProperty lv2:toggled, <" LV2_PORT_PROPS__notOnGUI "> ;\n";
+        text += "        lv2:designation lv2:freeWheeling ;\n";
+        text += "        lv2:portProperty lv2:toggled, pprops:notOnGUI ;\n";
         text += "    ] ;\n";
         text += "\n";
 
@@ -316,7 +410,7 @@ class JuceLV2FileCreator
         text += "        lv2:index " + String(portIndex++) + " ;\n";
         text += "        lv2:symbol \"lv2_latency\" ;\n";
         text += "        lv2:name \"Latency\" ;\n";
-        text += "        lv2:designation <" LV2_CORE__latency "> ;\n";
+        text += "        lv2:designation lv2:latency ;\n";
         text += "        lv2:portProperty lv2:reportsLatency, lv2:integer ;\n";
         text += "    ] ;\n";
         text += "\n";
@@ -360,9 +454,8 @@ class JuceLV2FileCreator
                 text += "    ] ,\n";
         }
 
+#if !JucePlugin_UseLV2Parameters
         // Parameters
-        OwnedArray<Lv2ParameterWrapper> parameters = wrapParameters (filter);
-        const OwnedArray<AudioProcessorParameter> &rawParams = filter->getParameters();
         for (int i=0; i < parameters.size(); ++i)
         {
             if (i == 0)
@@ -416,13 +509,17 @@ class JuceLV2FileCreator
             }
 
             if (! rawParams[i]->isAutomatable())
-                text += "        lv2:portProperty <" LV2_PORT_PROPS__expensive "> ;\n";
+            {
+                text += "        lv2:portProperty pprops:expensive ;\n";
+                text += "        lv2:portProperty pprops:notAutomatic ;\n";
+            }
 
             if (i+1 == parameters.size())
                 text += "    ] ;\n\n";
             else
                 text += "    ] ,\n";
         }
+#endif
 
         text += "    doap:name \"" + filter->getName() + "\" ;\n";
         text += "    doap:maintainer [ foaf:name \"" JucePlugin_Manufacturer "\" ] .\n";

@@ -1,0 +1,51 @@
+language: c++
+
+branches:
+  except:
+    - automatic
+
+cache:
+  directories:
+    - download
+
+matrix:
+  include:
+    - os: linux
+      sudo: required
+      dist: xenial
+      install:
+        - set -o pipefail
+        - sudo apt-get update -qq
+        - sudo apt-get install libasound2-dev libfreetype6-dev libcurl4-openssl-dev libx11-dev libxext-dev libxinerama-dev libwebkit2gtk-4.0-dev libgtk-3-dev libgl1-mesa-dev
+      script:
+        - |
+          build_project() {
+            make -C "$1"/Builds/LinuxMakefile
+          }
+        - build_project extras/AudioPluginHost
+        - build_project examples/DemoRunner
+    - os: osx
+      sudo: required
+      osx_image: xcode9.4
+      install:
+        - set -o pipefail
+        - |
+          download() {
+            mkdir -p download
+            local file=download/$(basename "$1")
+            if test ! -f "$file"; then curl -o "$file" "$1"; fi
+          }
+        - download https://www.steinberg.net/sdk_downloads/vstsdk367_03_03_2017_build_352.zip
+        - mkdir -p ~/SDKs
+        - unzip -q -d ~/SDKs download/vstsdk367_03_03_2017_build_352.zip
+      script:
+        - |
+          build_project() {
+            cd "$1"/Builds/MacOSX
+            xcodebuild
+            local code="$?"
+            cd -
+            test "$code" -eq 0
+          }
+        - build_project extras/AudioPluginHost
+        - build_project examples/DemoRunner

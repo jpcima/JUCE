@@ -95,7 +95,6 @@
  #include <pluginterfaces/vst/vsttypes.h>
 
  #include <base/source/baseiids.cpp>
- #include <base/source/fatomic.cpp>
  #include <base/source/fbuffer.cpp>
  #include <base/source/fdebug.cpp>
  #include <base/source/fobject.cpp>

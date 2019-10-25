@@ -16,7 +16,7 @@ matrix:
       install:
         - set -o pipefail
         - sudo apt-get update -qq
-        - sudo apt-get install libasound2-dev libfreetype6-dev libcurl4-openssl-dev libx11-dev libxext-dev libxinerama-dev libwebkit2gtk-4.0-dev libgtk-3-dev libgl1-mesa-dev
+        - sudo apt-get install libasound2-dev libfreetype6-dev libcurl4-openssl-dev libx11-dev libxext-dev libxinerama-dev libwebkit2gtk-4.0-dev libgtk-3-dev libgl1-mesa-dev ladspa-sdk
       script:
         - |
           build_project() {

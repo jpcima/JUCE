@@ -25,6 +25,7 @@
 */
 
 #include "../../Application/jucer_Headers.h"
+#include "../../ProjectSaving/jucer_ProjectExporter.h"
 #include "jucer_PIPGenerator.h"
 
 //==============================================================================
@@ -62,7 +63,7 @@ static void ensureSingleNewLineAfterIncludes (StringArray& lines)
     }
 }
 
-static String ensureCorrectWhitespace (const String& input)
+static String ensureCorrectWhitespace (StringRef input)
 {
     auto lines = StringArray::fromLines (input);
     ensureSingleNewLineAfterIncludes (lines);
@@ -83,6 +84,16 @@ static bool isJUCEExample (const File& pipFile)
     }
 
     return false;
+}
+
+static bool isValidExporterName (StringRef exporterName)
+{
+    return ProjectExporter::getExporterValueTreeNames().contains (exporterName, true);
+}
+
+static bool isMobileExporter (const String& exporterName)
+{
+    return exporterName == "XCODE_IPHONE" || exporterName == "ANDROIDSTUDIO";
 }
 
 //==============================================================================
@@ -297,7 +308,26 @@ ValueTree PIPGenerator::createExporterChild (const String& exporterName)
 {
     ValueTree exporter (exporterName);
 
-    exporter.setProperty (Ids::targetFolder, "Builds/" + getTargetFolderForExporter (exporterName), nullptr);
+    exporter.setProperty (Ids::targetFolder, "Builds/" + ProjectExporter::getTargetFolderForExporter (exporterName), nullptr);
+
+    if (isMobileExporter (exporterName))
+    {
+        auto juceDir = getAppSettings().getStoredPath (Ids::jucePath).toString();
+
+        if (juceDir.isNotEmpty() && isValidJUCEExamplesDirectory (File (juceDir).getChildFile ("examples")))
+        {
+            auto assetsDirectoryPath = File (juceDir).getChildFile ("examples").getChildFile ("Assets").getFullPathName();
+
+            exporter.setProperty (exporterName == "XCODE_IPHONE" ? Ids::customXcodeResourceFolders
+                                                                 : Ids::androidExtraAssetsFolder,
+                                  assetsDirectoryPath, nullptr);
+        }
+        else
+        {
+            // invalid JUCE path
+            jassertfalse;
+        }
+    }
 
     {
         ValueTree configs (Ids::CONFIGURATIONS);
@@ -395,12 +425,12 @@ Result PIPGenerator::setProjectSettings (ValueTree& jucerTree)
 
     if (useLocalCopy && isJUCEExample (pipFile))
     {
-        auto examplesDirectory = getJUCEExamplesDirectoryPathFromGlobal();
+        auto juceDir = getAppSettings().getStoredPath (Ids::jucePath).toString();
 
-        if (isValidJUCEExamplesDirectory (examplesDirectory))
+        if (juceDir.isNotEmpty() && isValidJUCEExamplesDirectory (File (juceDir).getChildFile ("examples")))
         {
              defines += ((defines.isEmpty() ? "" : " ") + String ("PIP_JUCE_EXAMPLES_DIRECTORY=")
-                         + Base64::toBase64 (examplesDirectory.getFullPathName()));
+                         + Base64::toBase64 (File (juceDir).getChildFile ("examples").getFullPathName()));
         }
         else
         {
@@ -426,10 +456,11 @@ Result PIPGenerator::setProjectSettings (ValueTree& jucerTree)
     else if (type == "AudioProcessor")
     {
         jucerTree.setProperty (Ids::projectType, "audioplug", nullptr);
+        jucerTree.setProperty (Ids::pluginManufacturer, metadata[Ids::vendor], nullptr);
 
-        jucerTree.setProperty (Ids::buildVST,        false, nullptr);
+        jucerTree.setProperty (Ids::buildVST,        true, nullptr);
         jucerTree.setProperty (Ids::buildVST3,       false, nullptr);
-        jucerTree.setProperty (Ids::buildAU,         false, nullptr);
+        jucerTree.setProperty (Ids::buildAU,         true, nullptr);
         jucerTree.setProperty (Ids::buildAUv3,       false, nullptr);
         jucerTree.setProperty (Ids::buildRTAS,       false, nullptr);
         jucerTree.setProperty (Ids::buildAAX,        false, nullptr);
@@ -481,7 +512,7 @@ String PIPGenerator::getMainFileTextForType()
         mainTemplate = mainTemplate.replace ("%%project_version%%", metadata[Ids::version].toString());
 
         return ensureCorrectWhitespace (mainTemplate.replace ("%%startup%%", "mainWindow = new MainWindow (" + metadata[Ids::name].toString().quoted()
-                                                            + ", new " + metadata[Ids::mainClass].toString() + "());")
+                                                            + ", new " + metadata[Ids::mainClass].toString() + "(), *this);")
                                                     .replace ("%%shutdown%%", "mainWindow = nullptr;"));
     }
     else if (type == "AudioProcessor")
@@ -509,6 +540,9 @@ Array<File> PIPGenerator::replaceRelativeIncludesAndGetFilesToMove()
         {
             auto path = line.fromFirstOccurrenceOf ("#include", false, false);
             path = path.removeCharacters ("\"").trim();
+
+            if (path.startsWith ("<") && path.endsWith (">"))
+                continue;
 
             auto file = pipFile.getParentDirectory().getChildFile (path);
             files.add (file);

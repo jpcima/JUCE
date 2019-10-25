@@ -380,6 +380,7 @@ void ProjucerApplication::createFileMenu (PopupMenu& menu)
 {
     menu.addCommandItem (commandManager, CommandIDs::newProject);
     menu.addCommandItem (commandManager, CommandIDs::newProjectFromClipboard);
+    menu.addCommandItem (commandManager, CommandIDs::newPIP);
     menu.addSeparator();
     menu.addCommandItem (commandManager, CommandIDs::open);
 
@@ -605,7 +606,7 @@ void ProjucerApplication::createExamplesPopupMenu (PopupMenu& menu) noexcept
     }
 }
 
-Array<File> ProjucerApplication::getSortedExampleDirectories() const noexcept
+Array<File> ProjucerApplication::getSortedExampleDirectories() noexcept
 {
     Array<File> exampleDirectories;
 
@@ -619,7 +620,8 @@ Array<File> ProjucerApplication::getSortedExampleDirectories() const noexcept
     {
         auto exampleDirectory = iter.getFile();
 
-        if (exampleDirectory.getFileName() != "DemoRunner" && exampleDirectory.getFileName() != "Assets")
+        if (exampleDirectory.getNumberOfChildFiles (File::findFiles | File::ignoreHiddenFiles) > 0
+            && exampleDirectory.getFileName() != "DemoRunner" && exampleDirectory.getFileName() != "Assets")
             exampleDirectories.add (exampleDirectory);
     }
 
@@ -661,6 +663,16 @@ bool ProjucerApplication::findWindowAndOpenPIP (const File& pip)
     return false;
 }
 
+File ProjucerApplication::getJUCEExamplesDirectoryPathFromGlobal() noexcept
+{
+    auto globalPath = getAppSettings().getStoredPath (Ids::jucePath).toString();
+
+    if (globalPath.isNotEmpty())
+        return File (globalPath).getChildFile ("examples");
+
+    return {};
+}
+
 void ProjucerApplication::findAndLaunchExample (int selectedIndex)
 {
     File example;
@@ -688,7 +700,7 @@ void ProjucerApplication::findAndLaunchExample (int selectedIndex)
     Analytics::getInstance()->logEvent ("Example Opened", data, ProjucerAnalyticsEvent::exampleEvent);
 }
 
-File ProjucerApplication::findDemoRunnerExecutable() const noexcept
+File ProjucerApplication::findDemoRunnerExecutable() noexcept
 {
     auto buildsPath = getJUCEExamplesDirectoryPathFromGlobal().getChildFile ("DemoRunner").getChildFile ("Builds");
 
@@ -732,19 +744,25 @@ File ProjucerApplication::findDemoRunnerExecutable() const noexcept
     extension = {};
    #endif
 
-    auto precompiledFile = getJUCEExamplesDirectoryPathFromGlobal().getChildFile ("DemoRunner" + extension);
+    auto juceDir = getAppSettings().getStoredPath (Ids::jucePath).toString();
 
-   #if JUCE_MAC
-    if (precompiledFile.exists())
-   #else
-    if (precompiledFile.existsAsFile())
-   #endif
-        return precompiledFile;
+    if (juceDir.isNotEmpty())
+    {
+        auto precompiledFile = File (juceDir).getChildFile ("DemoRunner" + extension);
+
+       #if JUCE_MAC
+        if (precompiledFile.exists())
+       #else
+        if (precompiledFile.existsAsFile())
+       #endif
+            return precompiledFile;
+    }
+
 
     return {};
 }
 
-File ProjucerApplication::findDemoRunnerProject() const noexcept
+File ProjucerApplication::findDemoRunnerProject() noexcept
 {
     auto buildsPath = getJUCEExamplesDirectoryPathFromGlobal().getChildFile ("DemoRunner").getChildFile ("Builds");
 
@@ -756,7 +774,7 @@ File ProjucerApplication::findDemoRunnerProject() const noexcept
 
     if (file.exists())
         return file;
-   #elif JUCE_WINDOW
+   #elif JUCE_WINDOWS
     auto file = buildsPath.getChildFile ("VisualStudio2017").getChildFile ("DemoRunner.sln");
 
     if (file.existsAsFile())
@@ -885,6 +903,7 @@ void ProjucerApplication::getAllCommands (Array <CommandID>& commands)
 
     const CommandID ids[] = { CommandIDs::newProject,
                               CommandIDs::newProjectFromClipboard,
+                              CommandIDs::newPIP,
                               CommandIDs::open,
                               CommandIDs::launchDemoRunner,
                               CommandIDs::closeAllWindows,
@@ -917,6 +936,11 @@ void ProjucerApplication::getCommandInfo (CommandID commandID, ApplicationComman
     case CommandIDs::newProjectFromClipboard:
         result.setInfo ("New Project From Clipboard...", "Creates a new JUCE project from the clipboard contents", CommandCategories::general, 0);
         result.defaultKeypresses.add (KeyPress ('n', ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0));
+        break;
+
+    case CommandIDs::newPIP:
+        result.setInfo ("New PIP...", "Opens the PIP Creator utility for creating a new PIP", CommandCategories::general, 0);
+            result.defaultKeypresses.add (KeyPress ('p', ModifierKeys::commandModifier, 0));
         break;
 
     case CommandIDs::launchDemoRunner:
@@ -1028,6 +1052,7 @@ bool ProjucerApplication::perform (const InvocationInfo& info)
     {
         case CommandIDs::newProject:                createNewProject(); break;
         case CommandIDs::newProjectFromClipboard:   createNewProjectFromClipboard(); break;
+        case CommandIDs::newPIP:                    createNewPIP(); break;
         case CommandIDs::open:                      askUserToOpenFile(); break;
         case CommandIDs::launchDemoRunner:          launchDemoRunner(); break;
         case CommandIDs::saveAll:                   openDocumentManager.saveAll(); break;
@@ -1077,9 +1102,9 @@ void ProjucerApplication::createNewProjectFromClipboard()
     }
 }
 
-void ProjucerApplication::updateNewlyOpenedProject (Project& p)
+void ProjucerApplication::createNewPIP()
 {
-    LiveBuildProjectSettings::updateNewlyOpenedProject (p);
+    showPIPCreatorWindow();
 }
 
 void ProjucerApplication::askUserToOpenFile()
@@ -1130,8 +1155,7 @@ void ProjucerApplication::showUTF8ToolWindow()
     if (utf8Window != nullptr)
         utf8Window->toFront (true);
     else
-        new FloatingToolWindow ("UTF-8 String Literal Converter",
-                                "utf8WindowPos",
+        new FloatingToolWindow ("UTF-8 String Literal Converter", "utf8WindowPos",
                                 new UTF8Component(), utf8Window, true,
                                 500, 500, 300, 300, 1000, 1000);
 }
@@ -1141,8 +1165,7 @@ void ProjucerApplication::showSVGPathDataToolWindow()
     if (svgPathWindow != nullptr)
         svgPathWindow->toFront (true);
     else
-        new FloatingToolWindow ("SVG Path Converter",
-                                "svgPathWindowPos",
+        new FloatingToolWindow ("SVG Path Converter", "svgPathWindowPos",
                                 new SVGPathDataComponent(), svgPathWindow, true,
                                 500, 500, 300, 300, 1000, 1000);
 }
@@ -1162,9 +1185,8 @@ void ProjucerApplication::showApplicationUsageDataAgreementPopup()
     if (applicationUsageDataWindow != nullptr)
         applicationUsageDataWindow->toFront (true);
     else
-        new FloatingToolWindow ("Application Usage Analytics",
-                                {}, new ApplicationUsageDataWindowComponent (isPaidOrGPL()),
-                                applicationUsageDataWindow, false,
+        new FloatingToolWindow ("Application Usage Analytics", {},
+                                new ApplicationUsageDataWindowComponent (isPaidOrGPL()), applicationUsageDataWindow, false,
                                 400, 300, 400, 300, 400, 300);
 }
 
@@ -1179,8 +1201,7 @@ void ProjucerApplication::showPathsWindow (bool highlightJUCEPath)
     if (pathsWindow != nullptr)
         pathsWindow->toFront (true);
     else
-        new FloatingToolWindow ("Global Paths",
-                                "pathsWindowPos",
+        new FloatingToolWindow ("Global Paths", "pathsWindowPos",
                                 new GlobalPathsWindowComponent(), pathsWindow, false,
                                 600, 650, 600, 650, 600, 650);
 
@@ -1194,14 +1215,19 @@ void ProjucerApplication::showEditorColourSchemeWindow()
     if (editorColourSchemeWindow != nullptr)
         editorColourSchemeWindow->toFront (true);
     else
-    {
-        new FloatingToolWindow ("Editor Colour Scheme",
-                                "editorColourSchemeWindowPos",
-                                new EditorColourSchemeWindowComponent(),
-                                editorColourSchemeWindow,
-                                false,
+        new FloatingToolWindow ("Editor Colour Scheme", "editorColourSchemeWindowPos",
+                                new EditorColourSchemeWindowComponent(), editorColourSchemeWindow, false,
                                 500, 500, 500, 500, 500, 500);
-    }
+}
+
+void ProjucerApplication::showPIPCreatorWindow()
+{
+    if (pipCreatorWindow != nullptr)
+        pipCreatorWindow->toFront (true);
+    else
+        new FloatingToolWindow ("PIP Creator", "pipCreatorWindowPos",
+                                new PIPCreatorWindowComponent(), pipCreatorWindow, false,
+                                600, 750, 600, 750, 600, 750);
 }
 
 void ProjucerApplication::launchForumBrowser()
@@ -1214,7 +1240,7 @@ void ProjucerApplication::launchForumBrowser()
 
 void ProjucerApplication::launchModulesBrowser()
 {
-    URL modulesLink ("https://juce.com/doc/modules");
+    URL modulesLink ("https://docs.juce.com/master/modules.html");
 
     if (modulesLink.isWellFormed())
         modulesLink.launchInDefaultBrowser();
@@ -1222,7 +1248,7 @@ void ProjucerApplication::launchModulesBrowser()
 
 void ProjucerApplication::launchClassesBrowser()
 {
-    URL classesLink ("https://juce.com/doc/classes");
+    URL classesLink ("https://docs.juce.com/master/classes.html");
 
     if (classesLink.isWellFormed())
         classesLink.launchInDefaultBrowser();
@@ -1230,7 +1256,7 @@ void ProjucerApplication::launchClassesBrowser()
 
 void ProjucerApplication::launchTutorialsBrowser()
 {
-    URL tutorialsLink ("https://juce.com/tutorials");
+    URL tutorialsLink ("https://juce.com/learn/tutorials");
 
     if (tutorialsLink.isWellFormed())
         tutorialsLink.launchInDefaultBrowser();
@@ -1408,6 +1434,7 @@ void ProjucerApplication::setColourScheme (int index, bool saveSetting)
     if (applicationUsageDataWindow != nullptr)  applicationUsageDataWindow->sendLookAndFeelChange();
     if (pathsWindow != nullptr)                 pathsWindow->sendLookAndFeelChange();
     if (editorColourSchemeWindow != nullptr)    editorColourSchemeWindow->sendLookAndFeelChange();
+    if (pipCreatorWindow != nullptr)            pipCreatorWindow->sendLookAndFeelChange();
 
     auto* mcm = ModalComponentManager::getInstance();
     for (auto i = 0; i < mcm->getNumModalComponents(); ++i)

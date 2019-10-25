@@ -515,7 +515,7 @@ private:
             out << newLine;
         }
 
-        if (hasBinaryData && project.shouldIncludeBinaryInAppConfig())
+        if (hasBinaryData && project.shouldIncludeBinaryInJuceHeader())
             out << CodeHelpers::createIncludeStatement (project.getBinaryDataHeaderFile(), appConfigFile) << newLine;
 
         out << newLine

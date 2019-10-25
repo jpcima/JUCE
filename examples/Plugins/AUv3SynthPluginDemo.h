@@ -25,7 +25,7 @@
 
  name:             AUv3SynthPlugin
  version:          1.0.0
- vendor:           juce
+ vendor:           JUCE
  website:          http://juce.com
  description:      AUv3 synthesiser audio plugin.
 
@@ -193,15 +193,18 @@ public:
         roomSizeSlider.setRange (0.0, 1.0);
         addAndMakeVisible (roomSizeSlider);
 
-        auto* fileStream = getAssetsDirectory().getChildFile ("proaudio.path").createInputStream();
+        if (auto* assetStream = createAssetInputStream ("proaudio.path"))
+        {
+            ScopedPointer<InputStream> fileStream (assetStream);
 
-        Path proAudioPath;
-        proAudioPath.loadPathFromStream (*fileStream);
-        proAudioIcon.setPath (proAudioPath);
-        addAndMakeVisible (proAudioIcon);
+            Path proAudioPath;
+            proAudioPath.loadPathFromStream (*fileStream);
+            proAudioIcon.setPath (proAudioPath);
+            addAndMakeVisible (proAudioIcon);
 
-        auto proAudioIconColour = findColour (TextButton::buttonOnColourId);
-        proAudioIcon.setFill (FillType (proAudioIconColour));
+            auto proAudioIconColour = findColour (TextButton::buttonOnColourId);
+            proAudioIcon.setFill (FillType (proAudioIconColour));
+        }
 
         setSize (600, 400);
         startTimer (100);
@@ -314,13 +317,13 @@ public:
         for (auto i = 0; i < maxNumVoices; ++i)
             synth.addVoice (new SamplerVoice());
 
-        loadNewSampleFile (getAssetsDirectory().getChildFile ("singing.ogg"), "ogg");
+        loadNewSample (createAssetInputStream ("singing.ogg"), "ogg");
     }
 
     //==============================================================================
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
     {
-        return (layouts.getMainOutputChannels() == 2);
+        return (layouts.getMainOutputChannels() <= 2);
     }
 
     void prepareToPlay (double sampleRate, int estimatedMaxSizeOfBuffer) override
@@ -407,12 +410,6 @@ private:
     void loadNewSampleBinary (const void* data, int dataSize, const char* format)
     {
         auto* soundBuffer = new MemoryInputStream (data, static_cast<std::size_t> (dataSize), false);
-        loadNewSample (soundBuffer, format);
-    }
-
-    void loadNewSampleFile (const File& sampleFile, const char* format)
-    {
-        auto* soundBuffer = sampleFile.createInputStream();
         loadNewSample (soundBuffer, format);
     }
 

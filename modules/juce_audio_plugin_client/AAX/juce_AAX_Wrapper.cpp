@@ -34,6 +34,8 @@
 #include "../utility/juce_WindowsHooks.h"
 #include "../utility/juce_FakeMouseMoveGenerator.h"
 
+#include "../../juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp"
+
 #ifdef __clang__
  #pragma clang diagnostic push
  #pragma clang diagnostic ignored "-Wnon-virtual-dtor"
@@ -70,6 +72,13 @@ static_assert (AAX_SDK_CURRENT_REVISION >= AAX_SDK_2p3p0_REVISION, "JUCE require
 #include <AAX_IDescriptionHost.h>
 #include <AAX_IFeatureInfo.h>
 #include <AAX_UIDs.h>
+
+#ifdef AAX_SDK_2p3p1_REVISION
+ #if AAX_SDK_CURRENT_REVISION >= AAX_SDK_2p3p1_REVISION
+  #include <AAX_Exception.h>
+  #include <AAX_Assert.h>
+ #endif
+#endif
 
 #ifdef _MSC_VER
  #pragma warning (pop)
@@ -129,11 +138,6 @@ namespace AAXClasses
     static void check (AAX_Result result)
     {
         jassert (result == AAX_SUCCESS); ignoreUnused (result);
-    }
-
-    static bool isBypassParam (AAX_CParamID paramID) noexcept
-    {
-        return AAX::IsParameterIDEqual (paramID, cDefaultMasterBypassID) != 0;
     }
 
     // maps a channel index of an AAX format to an index of a juce format
@@ -481,10 +485,12 @@ namespace AAXClasses
         {
             if (component != nullptr && component->pluginEditor != nullptr)
             {
-                if (! isBypassParam (paramID))
+                auto index = getParamIndexFromID (paramID);
+
+                if (index >= 0)
                 {
                     AudioProcessorEditor::ParameterControlHighlightInfo info;
-                    info.parameterIndex  = getParamIndexFromID (paramID);
+                    info.parameterIndex  = index;
                     info.isHighlighted   = (isHighlighted != 0);
                     info.suggestedColour = getColourFromHighlightEnum (colour);
 
@@ -531,7 +537,8 @@ namespace AAXClasses
 
                 if (pluginEditor != nullptr)
                 {
-                    setBounds (pluginEditor->getLocalBounds());
+                    lastValidSize = pluginEditor->getLocalBounds();
+                    setBounds (lastValidSize);
                     pluginEditor->addMouseListener (this, true);
                 }
 
@@ -580,10 +587,19 @@ namespace AAXClasses
                 {
                     auto w = pluginEditor->getWidth();
                     auto h = pluginEditor->getHeight();
-                    setSize (w, h);
 
                     AAX_Point newSize ((float) h, (float) w);
-                    owner.GetViewContainer()->SetViewSize (newSize);
+
+                    if (owner.GetViewContainer()->SetViewSize (newSize) == AAX_SUCCESS)
+                    {
+                        setSize (w, h);
+                        lastValidSize = getBounds();
+                    }
+                    else
+                    {
+                        auto validSize = pluginEditor->getBounds().withSize (lastValidSize.getWidth(), lastValidSize.getHeight());
+                        pluginEditor->setBoundsConstrained (validSize);
+                    }
                 }
             }
 
@@ -594,6 +610,7 @@ namespace AAXClasses
             WindowsHooks hooks;
            #endif
             FakeMouseMoveGenerator fakeMouseGenerator;
+            juce::Rectangle<int> lastValidSize;
 
             JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ContentWrapperComponent)
         };
@@ -635,6 +652,7 @@ namespace AAXClasses
         AAX_Result Uninitialize() override
         {
             cancelPendingUpdate();
+            juceParameters.clear();
 
             if (isPrepared && pluginInstance != nullptr)
             {
@@ -657,7 +675,6 @@ namespace AAXClasses
             if (err != AAX_SUCCESS)
                 return err;
 
-            addBypassParameter();
             addAudioProcessorParameters();
 
             return AAX_SUCCESS;
@@ -724,11 +741,11 @@ namespace AAXClasses
             // * The preset is loaded in PT 10 using the AAX version.
             // * The session is then saved, and closed.
             // * The saved session is loaded, but acting as if the preset was never loaded.
-            auto numParameters = pluginInstance->getNumParameters();
+            auto numParameters = juceParameters.getNumParameters();
 
             for (int i = 0; i < numParameters; ++i)
                 if (auto paramID = getAAXParamIDFromJuceIndex(i))
-                    SetParameterNormalizedValue (paramID, (double) pluginInstance->getParameter(i));
+                    SetParameterNormalizedValue (paramID, juceParameters.getParamForIndex (i)->getValue());
 
             return AAX_SUCCESS;
         }
@@ -782,46 +799,39 @@ namespace AAXClasses
             return AAX_SUCCESS;
         }
 
-        void setAudioProcessorParameter (int index, float value)
+        void setAudioProcessorParameter (AAX_CParamID paramID, double value)
         {
-            if (auto* param = pluginInstance->getParameters()[index])
+            if (auto* param = getParameterFromID (paramID))
             {
-                if (value != param->getValue())
+                auto newValue = static_cast<float> (value);
+
+                if (newValue != param->getValue())
                 {
-                    param->setValue (value);
+                    param->setValue (newValue);
 
                     inParameterChangedCallback = true;
-                    param->sendValueChangedMessageToListeners (value);
+                    param->sendValueChangedMessageToListeners (newValue);
                 }
-            }
-            else
-            {
-                pluginInstance->setParameter (index, value);
             }
         }
 
         AAX_Result UpdateParameterNormalizedValue (AAX_CParamID paramID, double value, AAX_EUpdateSource source) override
         {
             auto result = AAX_CEffectParameters::UpdateParameterNormalizedValue (paramID, value, source);
-
-            if (! isBypassParam (paramID))
-                setAudioProcessorParameter (getParamIndexFromID (paramID), (float) value);
+            setAudioProcessorParameter (paramID, value);
 
             return result;
         }
 
         AAX_Result GetParameterValueFromString (AAX_CParamID paramID, double* result, const AAX_IString& text) const override
         {
-            if (isBypassParam (paramID))
+            if (auto* param = getParameterFromID (paramID))
             {
-                *result = (text.Get()[0] == 'B') ? 1.0 : 0.0;
-                return AAX_SUCCESS;
-            }
-
-            if (AudioProcessorParameter* param = pluginInstance->getParameters() [getParamIndexFromID (paramID)])
-            {
-                *result = param->getValueForText (text.Get());
-                return AAX_SUCCESS;
+                if (! LegacyAudioParameter::isLegacy (param))
+                {
+                    *result = param->getValueForText (text.Get());
+                    return AAX_SUCCESS;
+                }
             }
 
             return AAX_CEffectParameters::GetParameterValueFromString (paramID, result, text);
@@ -829,104 +839,79 @@ namespace AAXClasses
 
         AAX_Result GetParameterStringFromValue (AAX_CParamID paramID, double value, AAX_IString* result, int32_t maxLen) const override
         {
-            if (isBypassParam (paramID))
-            {
-                result->Set (value == 0 ? "Off" : (maxLen >= 8 ? "Bypassed" : "Byp"));
-            }
-            else
-            {
-                auto paramIndex = getParamIndexFromID (paramID);
-                juce::String text;
-
-                if (auto* param = pluginInstance->getParameters() [paramIndex])
-                    text = param->getText ((float) value, maxLen);
-                else
-                    text = pluginInstance->getParameterText (paramIndex, maxLen);
-
-                result->Set (text.toRawUTF8());
-            }
+            if (auto* param = getParameterFromID (paramID))
+                result->Set (param->getText ((float) value, maxLen).toRawUTF8());
 
             return AAX_SUCCESS;
         }
 
         AAX_Result GetParameterNumberofSteps (AAX_CParamID paramID, int32_t* result) const
         {
-            if (isBypassParam (paramID))
-                *result = 2;
-            else
-                *result = pluginInstance->getParameterNumSteps (getParamIndexFromID (paramID));
+            if (auto* param = getParameterFromID (paramID))
+                *result = param->getNumSteps();
 
             return AAX_SUCCESS;
         }
 
         AAX_Result GetParameterNormalizedValue (AAX_CParamID paramID, double* result) const override
         {
-            if (isBypassParam (paramID))
-                return AAX_CEffectParameters::GetParameterNormalizedValue (paramID, result);
+            if (auto* param = getParameterFromID (paramID))
+                *result = (double) param->getValue();
+            else
+                *result = 0.0;
 
-            *result = pluginInstance->getParameter (getParamIndexFromID (paramID));
             return AAX_SUCCESS;
         }
 
         AAX_Result SetParameterNormalizedValue (AAX_CParamID paramID, double newValue) override
         {
-            if (isBypassParam (paramID))
-                return AAX_CEffectParameters::SetParameterNormalizedValue (paramID, newValue);
-
             if (auto* p = mParameterManager.GetParameterByID (paramID))
                 p->SetValueWithFloat ((float) newValue);
 
-            setAudioProcessorParameter (getParamIndexFromID (paramID), (float) newValue);
+            setAudioProcessorParameter (paramID, (float) newValue);
 
             return AAX_SUCCESS;
         }
 
         AAX_Result SetParameterNormalizedRelative (AAX_CParamID paramID, double newDeltaValue) override
         {
-            if (isBypassParam (paramID))
-                return AAX_CEffectParameters::SetParameterNormalizedRelative (paramID, newDeltaValue);
+            if (auto* param = getParameterFromID (paramID))
+            {
+                auto newValue = param->getValue() + (float) newDeltaValue;
 
-            auto paramIndex = getParamIndexFromID (paramID);
-            auto newValue = pluginInstance->getParameter (paramIndex) + (float) newDeltaValue;
+                setAudioProcessorParameter (paramID, jlimit (0.0f, 1.0f, newValue));
 
-            setAudioProcessorParameter (paramIndex, jlimit (0.0f, 1.0f, newValue));
-
-            if (auto* p = mParameterManager.GetParameterByID (paramID))
-                p->SetValueWithFloat (newValue);
+                if (auto* p = mParameterManager.GetParameterByID (paramID))
+                    p->SetValueWithFloat (newValue);
+            }
 
             return AAX_SUCCESS;
         }
 
         AAX_Result GetParameterNameOfLength (AAX_CParamID paramID, AAX_IString* result, int32_t maxLen) const override
         {
-            if (isBypassParam (paramID))
-                result->Set (maxLen >= 13 ? "Master Bypass"
-                                          : (maxLen >= 8 ? "Mast Byp"
-                                                         : (maxLen >= 6 ? "MstByp" : "MByp")));
-            else
-                result->Set (pluginInstance->getParameterName (getParamIndexFromID (paramID), maxLen).toRawUTF8());
+            if (auto* param = getParameterFromID (paramID))
+                result->Set (param->getName (maxLen).toRawUTF8());
 
             return AAX_SUCCESS;
         }
 
         AAX_Result GetParameterName (AAX_CParamID paramID, AAX_IString* result) const override
         {
-            if (isBypassParam (paramID))
-                result->Set ("Master Bypass");
-            else
-                result->Set (pluginInstance->getParameterName (getParamIndexFromID (paramID), 31).toRawUTF8());
+            if (auto* param = getParameterFromID (paramID))
+                result->Set (param->getName (31).toRawUTF8());
 
             return AAX_SUCCESS;
         }
 
         AAX_Result GetParameterDefaultNormalizedValue (AAX_CParamID paramID, double* result) const override
         {
-            if (! isBypassParam (paramID))
-            {
-                *result = (double) pluginInstance->getParameterDefaultValue (getParamIndexFromID (paramID));
+            if (auto* param = getParameterFromID (paramID))
+                *result = (double) param->getDefaultValue();
+            else
+                *result = 0.0;
 
-                jassert (*result >= 0 && *result <= 1.0f);
-            }
+            jassert (*result >= 0 && *result <= 1.0f);
 
             return AAX_SUCCESS;
         }
@@ -1014,13 +999,13 @@ namespace AAXClasses
         {
             ++mNumPlugInChanges;
 
-            auto numParameters = pluginInstance->getNumParameters();
+            auto numParameters = juceParameters.getNumParameters();
 
             for (int i = 0; i < numParameters; ++i)
             {
                 if (auto* p = mParameterManager.GetParameterByID (getAAXParamIDFromJuceIndex (i)))
                 {
-                    auto newName = processor->getParameterName (i, 31);
+                    auto newName = juceParameters.getParamForIndex (i)->getName (31);
 
                     if (p->Name() != newName.toRawUTF8())
                         p->SetName (AAX_CString (newName.toRawUTF8()));
@@ -1158,7 +1143,7 @@ namespace AAXClasses
 
                 if (meterBuffers != nullptr)
                     for (int i = 0; i < numMeters; ++i)
-                        meterBuffers[i] = pluginInstance->getParameter (aaxMeters[i]);
+                        meterBuffers[i] = aaxMeters[i]->getValue();
             }
         }
 
@@ -1405,76 +1390,102 @@ namespace AAXClasses
            #endif
         }
 
-        void addBypassParameter()
+        bool isBypassPartOfRegularParemeters() const
         {
-            auto* masterBypass = new AAX_CParameter<bool> (cDefaultMasterBypassID,
-                                                           AAX_CString ("Master Bypass"),
-                                                           false,
-                                                           AAX_CBinaryTaperDelegate<bool>(),
-                                                           AAX_CBinaryDisplayDelegate<bool> ("bypass", "on"),
-                                                           true);
-            masterBypass->SetNumberOfSteps (2);
-            masterBypass->SetType (AAX_eParameterType_Discrete);
-            mParameterManager.AddParameter (masterBypass);
-            mPacketDispatcher.RegisterPacket (cDefaultMasterBypassID, JUCEAlgorithmIDs::bypass);
+            auto& audioProcessor = getPluginInstance();
+
+            int n = juceParameters.getNumParameters();
+
+            if (auto* bypassParam = audioProcessor.getBypassParameter())
+                for (int i = 0; i < n; ++i)
+                    if (juceParameters.getParamForIndex (i) == bypassParam)
+                        return true;
+
+            return false;
         }
 
         void addAudioProcessorParameters()
         {
             auto& audioProcessor = getPluginInstance();
-            auto numParameters = audioProcessor.getNumParameters();
 
            #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
-            const bool usingManagedParameters = false;
+            const bool forceLegacyParamIDs = true;
            #else
-            const bool usingManagedParameters = (audioProcessor.getParameters().size() == numParameters);
+            const bool forceLegacyParamIDs = false;
            #endif
 
-            for (int parameterIndex = 0; parameterIndex < numParameters; ++parameterIndex)
+            auto bypassPartOfRegularParams = isBypassPartOfRegularParemeters();
+
+            juceParameters.update (audioProcessor, forceLegacyParamIDs);
+
+            bool aaxWrapperProvidedBypassParam = false;
+            auto* bypassParameter = pluginInstance->getBypassParameter();
+
+            if (bypassParameter == nullptr)
             {
-                auto category = audioProcessor.getParameterCategory (parameterIndex);
+                aaxWrapperProvidedBypassParam = true;
 
-                aaxParamIDs.add (usingManagedParameters ? audioProcessor.getParameterID (parameterIndex)
-                                                        : String (parameterIndex));
+                ownedBypassParameter = new AudioParameterBool (cDefaultMasterBypassID, "Master Bypass", false, {}, {}, {});
 
-                auto paramID = aaxParamIDs.getReference (parameterIndex).getCharPointer();
+                bypassParameter = ownedBypassParameter;
+            }
 
-                paramMap.set (AAXClasses::getAAXParamHash (paramID), parameterIndex);
+            if (! bypassPartOfRegularParams)
+                juceParameters.params.add (bypassParameter);
+
+            int parameterIndex = 0;
+
+            for (auto* juceParam : juceParameters.params)
+            {
+                auto isBypassParameter = (juceParam == bypassParameter);
+
+                auto category = juceParam->getCategory();
+                auto paramID  = isBypassParameter ? String (cDefaultMasterBypassID)
+                                                  : juceParameters.getParamID (audioProcessor, parameterIndex);
+
+                aaxParamIDs.add (paramID);
+                auto aaxParamID = aaxParamIDs.getReference (parameterIndex++).getCharPointer();
+
+
+                paramMap.set (AAXClasses::getAAXParamHash (aaxParamID), juceParam);
 
                 // is this a meter?
                 if (((category & 0xffff0000) >> 16) == 2)
                 {
-                    aaxMeters.add (parameterIndex);
+                    aaxMeters.add (juceParam);
                     continue;
                 }
 
-                auto parameter = new AAX_CParameter<float> (paramID,
-                                                            AAX_CString (audioProcessor.getParameterName (parameterIndex, 31).toRawUTF8()),
-                                                            audioProcessor.getParameterDefaultValue (parameterIndex),
+                auto parameter = new AAX_CParameter<float> (aaxParamID,
+                                                            AAX_CString (juceParam->getName (31).toRawUTF8()),
+                                                            juceParam->getDefaultValue(),
                                                             AAX_CLinearTaperDelegate<float, 0>(),
                                                             AAX_CNumberDisplayDelegate<float, 3>(),
-                                                            audioProcessor.isParameterAutomatable (parameterIndex));
+                                                            juceParam->isAutomatable());
 
-                parameter->AddShortenedName (audioProcessor.getParameterName (parameterIndex, 4).toRawUTF8());
+                parameter->AddShortenedName (juceParam->getName (4).toRawUTF8());
 
-                auto parameterNumSteps = audioProcessor.getParameterNumSteps (parameterIndex);
+                auto parameterNumSteps = juceParam->getNumSteps();
                 parameter->SetNumberOfSteps ((uint32_t) parameterNumSteps);
 
                #if JUCE_FORCE_LEGACY_PARAMETER_AUTOMATION_TYPE
                 parameter->SetType (parameterNumSteps > 1000 ? AAX_eParameterType_Continuous
                                                              : AAX_eParameterType_Discrete);
                #else
-                parameter->SetType (audioProcessor.isParameterDiscrete (parameterIndex) ? AAX_eParameterType_Discrete
-                                                                                        : AAX_eParameterType_Continuous);
+                parameter->SetType (juceParam->isDiscrete() ? AAX_eParameterType_Discrete
+                                                            : AAX_eParameterType_Continuous);
                #endif
 
-                parameter->SetOrientation (audioProcessor.isParameterOrientationInverted (parameterIndex)
+                parameter->SetOrientation (juceParam->isOrientationInverted()
                                             ? (AAX_eParameterOrientation_RightMinLeftMax | AAX_eParameterOrientation_TopMinBottomMax
                                                 | AAX_eParameterOrientation_RotarySingleDotMode | AAX_eParameterOrientation_RotaryRightMinLeftMax)
                                             : (AAX_eParameterOrientation_LeftMinRightMax | AAX_eParameterOrientation_BottomMinTopMax
                                                 | AAX_eParameterOrientation_RotarySingleDotMode | AAX_eParameterOrientation_RotaryLeftMinRightMax));
 
                 mParameterManager.AddParameter (parameter);
+
+                if (isBypassParameter)
+                    mPacketDispatcher.RegisterPacket (aaxParamID, JUCEAlgorithmIDs::bypass);
             }
         }
 
@@ -1696,7 +1707,10 @@ namespace AAXClasses
         //==============================================================================
         inline int getParamIndexFromID (AAX_CParamID paramID) const noexcept
         {
-            return paramMap [AAXClasses::getAAXParamHash (paramID)];
+            if (auto* param = getParameterFromID (paramID))
+                return LegacyAudioParameter::getParamIndex (getPluginInstance(), param);
+
+            return -1;
         }
 
         inline AAX_CParamID getAAXParamIDFromJuceIndex (int index) const noexcept
@@ -1705,6 +1719,11 @@ namespace AAXClasses
                 return aaxParamIDs.getReference (index).getCharPointer();
 
             return nullptr;
+        }
+
+        AudioProcessorParameter* getParameterFromID (AAX_CParamID paramID) const noexcept
+        {
+            return paramMap [AAXClasses::getAAXParamHash (paramID)];
         }
 
         //==============================================================================
@@ -1757,9 +1776,11 @@ namespace AAXClasses
         Array<int> inputLayoutMap, outputLayoutMap;
 
         Array<String> aaxParamIDs;
-        HashMap<int32, int> paramMap;
+        HashMap<int32, AudioProcessorParameter*> paramMap;
+        LegacyAudioParametersWrapper juceParameters;
+        ScopedPointer<AudioProcessorParameter> ownedBypassParameter;
 
-        Array<int> aaxMeters;
+        Array<AudioProcessorParameter*> aaxMeters;
 
         struct ChunkMemoryBlock
         {
@@ -1835,12 +1856,21 @@ namespace AAXClasses
     //==============================================================================
     static int addAAXMeters (AudioProcessor& p, AAX_IEffectDescriptor& descriptor)
     {
-        const int n = p.getNumParameters();
+        LegacyAudioParametersWrapper params;
+
+       #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
+        const bool forceLegacyParamIDs = true;
+       #else
+        const bool forceLegacyParamIDs = false;
+       #endif
+
+        params.update (p, forceLegacyParamIDs);
+
         int meterIdx = 0;
 
-        for (int i = 0; i < n; ++i)
+        for (auto* param : params.params)
         {
-            auto category = p.getParameterCategory (i);
+            auto category = param->getCategory();
 
             // is this a meter?
             if (((category & 0xffff0000) >> 16) == 2)
@@ -1851,7 +1881,7 @@ namespace AAXClasses
                     meterProperties->AddProperty (AAX_eProperty_Meter_Orientation, AAX_eMeterOrientation_TopRight);
 
                     descriptor.AddMeterDescription ('Metr' + static_cast<AAX_CTypeID> (meterIdx++),
-                                                    p.getParameterName (i).toRawUTF8(), meterProperties);
+                                                    param->getName (1024).toRawUTF8(), meterProperties);
                 }
             }
         }

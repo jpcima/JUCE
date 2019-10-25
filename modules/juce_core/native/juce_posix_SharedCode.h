@@ -1158,30 +1158,30 @@ class ChildProcess::ActiveProcess
 {
 public:
     ActiveProcess (const StringArray& arguments, int streamFlags)
-        : childPID (0), pipeHandle (0), readHandle (0)
     {
-        String exe (arguments[0].unquoted());
+        auto exe = arguments[0].unquoted();
 
         // Looks like you're trying to launch a non-existent exe or a folder (perhaps on OSX
         // you're trying to launch the .app folder rather than the actual binary inside it?)
         jassert (File::getCurrentWorkingDirectory().getChildFile (exe).existsAsFile()
                   || ! exe.containsChar (File::getSeparatorChar()));
 
-        int pipeHandles[2] = { 0 };
+        int pipeHandles[2] = {};
 
         if (pipe (pipeHandles) == 0)
         {
               Array<char*> argv;
-              for (int i = 0; i < arguments.size(); ++i)
-                  if (arguments[i].isNotEmpty())
-                      argv.add (const_cast<char*> (arguments[i].toRawUTF8()));
+
+              for (auto& arg : arguments)
+                  if (arg.isNotEmpty())
+                      argv.add (const_cast<char*> (arg.toRawUTF8()));
 
               argv.add (nullptr);
 
 #if JUCE_USE_VFORK
-            const pid_t result = vfork();
+            auto result = vfork();
 #else
-            const pid_t result = fork();
+            auto result = fork();
 #endif
 
             if (result < 0)
@@ -1208,8 +1208,8 @@ public:
                 close (pipeHandles[1]);
 #endif
 
-                if (execvp (argv[0], argv.getRawDataPointer()) < 0)
-                    _exit (-1);
+                execvp (argv[0], argv.getRawDataPointer());
+                _exit (-1);
             }
             else
             {
@@ -1225,7 +1225,7 @@ public:
 
     ~ActiveProcess()
     {
-        if (readHandle != 0)
+        if (readHandle != nullptr)
             fclose (readHandle);
 
         if (pipeHandle != 0)
@@ -1234,28 +1234,26 @@ public:
 
     bool isRunning() const noexcept
     {
-        if (childPID != 0)
-        {
-            int childState;
-            const int pid = waitpid (childPID, &childState, WNOHANG);
-            return pid == 0 || ! (WIFEXITED (childState) || WIFSIGNALED (childState));
-        }
+        if (childPID == 0)
+            return false;
 
-        return false;
+        int childState;
+        auto pid = waitpid (childPID, &childState, WNOHANG);
+        return pid == 0 || ! (WIFEXITED (childState) || WIFSIGNALED (childState));
     }
 
-    int read (void* const dest, const int numBytes) noexcept
+    int read (void* dest, int numBytes) noexcept
     {
-        jassert (dest != nullptr);
+        jassert (dest != nullptr && numBytes > 0);
 
         #ifdef fdopen
-         #error // the zlib headers define this function as NULL!
+         #error // some crazy 3rd party headers (e.g. zlib) define this function as NULL!
         #endif
 
-        if (readHandle == 0 && childPID != 0)
+        if (childPID != 0)
             readHandle = fdopen (pipeHandle, "r");
 
-        if (readHandle != 0)
+        if (readHandle != nullptr)
             return (int) fread (dest, 1, (size_t) numBytes, readHandle);
 
         return 0;
@@ -1271,7 +1269,7 @@ public:
         if (childPID != 0)
         {
             int childState = 0;
-            const int pid = waitpid (childPID, &childState, WNOHANG);
+            auto pid = waitpid (childPID, &childState, WNOHANG);
 
             if (pid >= 0 && WIFEXITED (childState))
                 return WEXITSTATUS (childState);
@@ -1285,11 +1283,9 @@ public:
         return childPID;
     }
 
-    int childPID;
-
-private:
-    int pipeHandle;
-    FILE* readHandle;
+    int childPID = 0;
+    int pipeHandle = 0;
+    FILE* readHandle = {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ActiveProcess)
 };

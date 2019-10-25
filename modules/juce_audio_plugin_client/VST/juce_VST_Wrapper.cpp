@@ -79,6 +79,7 @@
 #include "../utility/juce_FakeMouseMoveGenerator.h"
 #include "../utility/juce_WindowsHooks.h"
 
+#include "../../juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp"
 #include "../../juce_audio_processors/format_types/juce_VSTCommon.h"
 
 #ifdef _MSC_VER
@@ -222,7 +223,8 @@ struct AbletonLiveHostSpecific
 class JuceVSTWrapper  : public AudioProcessorListener,
                         public AudioPlayHead,
                         private Timer,
-                        private AsyncUpdater
+                        private AsyncUpdater,
+                        private AudioProcessorParameter::Listener
 {
 private:
     //==============================================================================
@@ -260,6 +262,8 @@ public:
        : hostCallback (cb),
          processor (af)
     {
+        inParameterChangedCallback = false;
+
         // VST-2 does not support disabling buses: so always enable all of them
         processor->enableAllBuses();
 
@@ -276,6 +280,11 @@ public:
         processor->setPlayHead (this);
         processor->addListener (this);
 
+        if (auto* juceParam = processor->getBypassParameter())
+            juceParam->addListener (this);
+
+        juceParameters.update (*processor, false);
+
         memset (&vstEffect, 0, sizeof (vstEffect));
         vstEffect.interfaceIdentifier = juceVstInterfaceIdentifier;
         vstEffect.dispatchFunction = dispatcherCB;
@@ -283,7 +292,7 @@ public:
         vstEffect.setParameterValueFunction = setParameterCB;
         vstEffect.getParameterValueFunction = getParameterCB;
         vstEffect.numPrograms = jmax (1, af->getNumPrograms());
-        vstEffect.numParameters = af->getNumParameters();
+        vstEffect.numParameters = juceParameters.getNumParameters();
         vstEffect.numInputChannels = maxNumInChannels;
         vstEffect.numOutputChannels = maxNumOutChannels;
         vstEffect.latency = processor->getLatencySamples();
@@ -701,11 +710,10 @@ public:
     //==============================================================================
     float getParameter (int32 index) const
     {
-        if (processor == nullptr)
-            return 0.0f;
+        if (auto* param = juceParameters.getParamForIndex (index))
+            return param->getValue();
 
-        jassert (isPositiveAndBelow (index, processor->getNumParameters()));
-        return processor->getParameter (index);
+        return 0.0f;
     }
 
     static float getParameterCB (VstEffectInterface* vstInterface, int32 index)
@@ -715,18 +723,12 @@ public:
 
     void setParameter (int32 index, float value)
     {
-        if (processor != nullptr)
+        if (auto* param = juceParameters.getParamForIndex (index))
         {
-            if (auto* param = processor->getParameters()[index])
-            {
-                param->setValue (value);
-                param->sendValueChangedMessageToListeners (value);
-            }
-            else
-            {
-                jassert (isPositiveAndBelow (index, processor->getNumParameters()));
-                processor->setParameter (index, value);
-            }
+            param->setValue (value);
+
+            inParameterChangedCallback = true;
+            param->sendValueChangedMessageToListeners (value);
         }
     }
 
@@ -737,6 +739,12 @@ public:
 
     void audioProcessorParameterChanged (AudioProcessor*, int index, float newValue) override
     {
+        if (inParameterChangedCallback.get())
+        {
+            inParameterChangedCallback = false;
+            return;
+        }
+
         if (hostCallback != nullptr)
             hostCallback (&vstEffect, hostOpcodeParameterChanged, index, 0, 0, newValue);
     }
@@ -752,6 +760,14 @@ public:
         if (hostCallback != nullptr)
             hostCallback (&vstEffect, hostOpcodeParameterChangeGestureEnd, index, 0, 0, 0);
     }
+
+    void parameterValueChanged (int, float newValue) override
+    {
+        // this can only come from the bypass parameter
+        isBypassed = (newValue != 0.0f);
+    }
+
+    void parameterGestureChanged (int, bool) override {}
 
     void audioProcessorChanged (AudioProcessor*) override
     {
@@ -1269,10 +1285,12 @@ public:
             if (auto* ed = getEditorComp())
             {
                 ed->setTopLeftPosition (0, 0);
-                ed->setBounds (ed->getLocalArea (this, getLocalBounds()));
+
+                if (shouldResizeEditor)
+                    ed->setBounds (ed->getLocalArea (this, getLocalBounds()));
 
                 if (! getHostType().isBitwigStudio())
-                    updateWindowSize();
+                    updateWindowSize (false);
             }
 
            #if JUCE_MAC && ! JUCE_64BIT
@@ -1283,7 +1301,7 @@ public:
 
         void childBoundsChanged (Component*) override
         {
-            updateWindowSize();
+            updateWindowSize (false);
         }
 
         juce::Rectangle<int> getSizeToContainChild()
@@ -1294,7 +1312,7 @@ public:
             return {};
         }
 
-        void updateWindowSize()
+        void updateWindowSize (bool resizeEditor)
         {
             if (! isInSizeWindow)
             {
@@ -1311,8 +1329,14 @@ public:
                     resizeHostWindow (pos.getWidth(), pos.getHeight());
 
                    #if ! JUCE_LINUX // setSize() on linux causes renoise and energyxt to fail.
+                    if (! resizeEditor) // this is needed to prevent an infinite resizing loop due to coordinate rounding
+                        shouldResizeEditor = false;
+
                     setSize (pos.getWidth(), pos.getHeight());
+
+                    shouldResizeEditor = true;
                    #else
+                    ignoreUnused (resizeEditor);
                     XResizeWindow (display.display, (Window) getWindowHandle(), pos.getWidth(), pos.getHeight());
                    #endif
 
@@ -1430,6 +1454,7 @@ public:
         JuceVSTWrapper& wrapper;
         FakeMouseMoveGenerator fakeMouseGenerator;
         bool isInSizeWindow = false;
+        bool shouldResizeEditor = true;
 
        #if JUCE_MAC
         void* hostWindow = {};
@@ -1459,6 +1484,8 @@ private:
     VSTMidiEventList outgoingEvents;
     float editorScaleFactor = 1.0f;
 
+    LegacyAudioParametersWrapper juceParameters;
+
     bool isProcessing = false, isBypassed = false, hasShutdown = false;
     bool firstProcessCallback = true, shouldDeleteEditor = false;
 
@@ -1473,6 +1500,8 @@ private:
     int maxNumInChannels = 0, maxNumOutChannels = 0;
 
     HeapBlock<VstSpeakerConfiguration> cachedInArrangement, cachedOutArrangement;
+
+    ThreadLocalValue<bool> inParameterChangedCallback;
 
     static JuceVSTWrapper* getWrapper (VstEffectInterface* v) noexcept  { return static_cast<JuceVSTWrapper*> (v->effectPointer); }
 
@@ -1649,11 +1678,10 @@ private:
 
     pointer_sized_int handleGetParameterLabel (VstOpCodeArguments args)
     {
-        if (processor != nullptr)
+        if (auto* param = juceParameters.getParamForIndex (args.index))
         {
-            jassert (isPositiveAndBelow (args.index, processor->getNumParameters()));
             // length should technically be kVstMaxParamStrLen, which is 8, but hosts will normally allow a bit more.
-            processor->getParameterLabel (args.index).copyToUTF8 ((char*) args.ptr, 24 + 1);
+            param->getLabel().copyToUTF8 ((char*) args.ptr, 24 + 1);
         }
 
         return 0;
@@ -1661,11 +1689,10 @@ private:
 
     pointer_sized_int handleGetParameterText (VstOpCodeArguments args)
     {
-        if (processor != nullptr)
+        if (auto* param = juceParameters.getParamForIndex (args.index))
         {
-            jassert (isPositiveAndBelow (args.index, processor->getNumParameters()));
             // length should technically be kVstMaxParamStrLen, which is 8, but hosts will normally allow a bit more.
-            processor->getParameterText (args.index, 24).copyToUTF8 ((char*) args.ptr, 24 + 1);
+            param->getCurrentValueAsText().copyToUTF8 ((char*) args.ptr, 24 + 1);
         }
 
         return 0;
@@ -1673,11 +1700,10 @@ private:
 
     pointer_sized_int handleGetParameterName (VstOpCodeArguments args)
     {
-        if (processor != nullptr)
+        if (auto* param = juceParameters.getParamForIndex (args.index))
         {
-            jassert (isPositiveAndBelow (args.index, processor->getNumParameters()));
             // length should technically be kVstMaxParamStrLen, which is 8, but hosts will normally allow a bit more.
-            processor->getParameterName (args.index, 32).copyToUTF8 ((char*) args.ptr, 32 + 1);
+            param->getName (32).copyToUTF8 ((char*) args.ptr, 32 + 1);
         }
 
         return 0;
@@ -1808,23 +1834,25 @@ private:
 
     pointer_sized_int handleIsParameterAutomatable (VstOpCodeArguments args)
     {
-        if (processor == nullptr)
-            return 0;
+        if (auto* param = juceParameters.getParamForIndex (args.index))
+        {
+            const bool isMeter = (((param->getCategory() & 0xffff0000) >> 16) == 2);
+            return (param->isAutomatable() && (! isMeter) ? 1 : 0);
+        }
 
-        const bool isMeter = (((processor->getParameterCategory (args.index) & 0xffff0000) >> 16) == 2);
-        return (processor->isParameterAutomatable (args.index) && (! isMeter) ? 1 : 0);
+        return 0;
     }
 
     pointer_sized_int handleParameterValueForText (VstOpCodeArguments args)
     {
-        if (processor != nullptr)
+        if (auto* param = juceParameters.getParamForIndex (args.index))
         {
-            jassert (isPositiveAndBelow (args.index, processor->getNumParameters()));
-
-            if (auto* param = processor->getParameters()[args.index])
+            if (! LegacyAudioParameter::isLegacy (param))
             {
                 auto value = param->getValueForText (String::fromUTF8 ((char*) args.ptr));
                 param->setValue (value);
+
+                inParameterChangedCallback = true;
                 param->sendValueChangedMessageToListeners (value);
 
                 return 1;
@@ -1911,6 +1939,10 @@ private:
     pointer_sized_int handleSetBypass (VstOpCodeArguments args)
     {
         isBypassed = (args.value != 0);
+
+        if (auto* bypass = processor->getBypassParameter())
+            bypass->setValueNotifyingHost (isBypassed ? 1.0f : 0.0f);
+
         return 1;
     }
 
@@ -2089,7 +2121,7 @@ private:
                     ed->setScaleFactor (editorScaleFactor);
 
                 if (editorComp != nullptr)
-                    editorComp->updateWindowSize();
+                    editorComp->updateWindowSize (true);
             }
            #endif
         }
@@ -2103,11 +2135,14 @@ private:
     {
         if (processor != nullptr && dest != nullptr)
         {
-            if (auto* param = processor->getParameters()[(int) paramIndex])
+            if (auto* param = juceParameters.getParamForIndex ((int) paramIndex))
             {
-                String text (param->getText (value, 1024));
-                memcpy (dest, text.toRawUTF8(), ((size_t) text.length()) + 1);
-                return 0xbeef;
+                if (! LegacyAudioParameter::isLegacy (param))
+                {
+                    String text (param->getText (value, 1024));
+                    memcpy (dest, text.toRawUTF8(), ((size_t) text.length()) + 1);
+                    return 0xbeef;
+                }
             }
         }
 

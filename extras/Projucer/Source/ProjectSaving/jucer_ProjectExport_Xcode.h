@@ -89,7 +89,7 @@ public:
     {
         name = iOS ? getNameiOS() : getNameMac();
 
-        targetLocationValue.setDefault (getDefaultBuildsRootFolder() + (iOS ? "iOS" : "MacOSX"));
+        targetLocationValue.setDefault (getDefaultBuildsRootFolder() + getTargetFolderForExporter (getValueTreeTypeName (isIOS)));
     }
 
     static XcodeProjectExporter* createForSettings (Project& project, const ValueTree& settings)
@@ -129,6 +129,9 @@ public:
     bool isPushNotificationsEnabled() const          { return iosPushNotificationsValue.get(); }
     bool isAppGroupsEnabled() const                  { return iosAppGroupsValue.get(); }
     bool isiCloudPermissionsEnabled() const          { return iCloudPermissionsValue.get(); }
+    bool isFileSharingEnabled() const                { return uiFileSharingEnabledValue.get(); }
+    bool isDocumentBrowserEnabled() const            { return uiSupportsDocumentBrowserValue.get(); }
+    bool isStatusBarHidden() const                   { return uiStatusBarHiddenValue.get(); }
 
     String getIosDevelopmentTeamIDString() const     { return iosDevelopmentTeamIDValue.get(); }
     String getAppGroupIdString() const               { return iosAppGroupsIDValue.get(); }
@@ -412,7 +415,7 @@ protected:
         XcodeBuildConfiguration (Project& p, const ValueTree& t, const bool isIOS, const ProjectExporter& e)
             : BuildConfiguration (p, t, e),
               iOS (isIOS),
-              osxSDKVersion                (config, Ids::osxSDK,                       getUndoManager(), String (osxVersionDefault) + " SDK"),
+              osxSDKVersion                (config, Ids::osxSDK,                       getUndoManager()),
               osxDeploymentTarget          (config, Ids::osxCompatibility,             getUndoManager(), String (osxVersionDefault) + " SDK"),
               iosDeploymentTarget          (config, Ids::iosCompatibility,             getUndoManager(), iosVersionDefault),
               osxArchitecture              (config, Ids::osxArchitecture,              getUndoManager(), osxArch_Default),
@@ -465,7 +468,8 @@ protected:
                 }
 
                 props.add (new ChoicePropertyComponent (osxSDKVersion, "OSX Base SDK Version", sdkVersionNames, versionValues),
-                           "The version of OSX to link against in the Xcode build.");
+                           "The version of OSX to link against in the Xcode build. If \"Default\" is selected then the field will be left "
+                           "empty and the Xcode default will be used.");
 
                 props.add (new ChoicePropertyComponent (osxDeploymentTarget, "OSX Deployment Target", osxVersionNames, versionValues),
                            "The minimum version of OSX that the target binary will be compatible with.");
@@ -1341,13 +1345,13 @@ public:
                 }
             }
 
-            if (owner.settings [Ids::UIFileSharingEnabled] && type != AudioUnitv3PlugIn)
+            if (owner.isFileSharingEnabled() && type != AudioUnitv3PlugIn)
                 addPlistDictionaryKeyBool (dict, "UIFileSharingEnabled", true);
 
-            if (owner.settings [Ids::UISupportsDocumentBrowser])
+            if (owner.isDocumentBrowserEnabled())
                 addPlistDictionaryKeyBool (dict, "UISupportsDocumentBrowser", true);
 
-            if (owner.settings [Ids::UIStatusBarHidden] && type != AudioUnitv3PlugIn)
+            if (owner.isStatusBarHidden() && type != AudioUnitv3PlugIn)
                 addPlistDictionaryKeyBool (dict, "UIStatusBarHidden", true);
 
             if (owner.iOS)
@@ -1515,7 +1519,7 @@ public:
             addPlistDictionaryKey (dict, "description", owner.project.getPluginDescriptionString());
             addPlistDictionaryKey (dict, "factoryFunction", owner.project.getPluginAUExportPrefixString() + "Factory");
             addPlistDictionaryKey (dict, "manufacturer", pluginManufacturerCode);
-            addPlistDictionaryKey (dict, "type", owner.project.getAUMainTypeCode());
+            addPlistDictionaryKey (dict, "type", owner.project.getAUMainTypeString().removeCharacters ("'"));
             addPlistDictionaryKey (dict, "subtype", pluginSubType);
             addPlistDictionaryKeyInt (dict, "version", owner.project.getVersionAsHexInteger());
 
@@ -1550,7 +1554,7 @@ public:
             addPlistDictionaryKey (componentDict, "description", owner.project.getPluginDescriptionString());
             addPlistDictionaryKey (componentDict, "factoryFunction",owner.project. getPluginAUExportPrefixString() + "FactoryAUv3");
             addPlistDictionaryKey (componentDict, "manufacturer", owner.project.getPluginManufacturerCodeString().substring (0, 4));
-            addPlistDictionaryKey (componentDict, "type", owner.project.getAUMainTypeCode());
+            addPlistDictionaryKey (componentDict, "type", owner.project.getAUMainTypeString().removeCharacters ("'"));
             addPlistDictionaryKey (componentDict, "subtype", owner.project.getPluginCodeString().substring (0, 4));
             addPlistDictionaryKeyInt (componentDict, "version", owner.project.getVersionAsHexInteger());
             addPlistDictionaryKeyBool (componentDict, "sandboxSafe", true);
@@ -1656,7 +1660,7 @@ public:
 
         String getOSXDeploymentTarget (const XcodeBuildConfiguration& config, String* sdkRoot = nullptr) const
         {
-            auto sdk = config.getOSXSDKVersionString() + " SDK";
+            auto sdk = config.getOSXSDKVersionString();
             auto sdkCompat = config.getOSXDeploymentTargetString();
 
             // The AUv3 target always needs to be at least 10.11
@@ -1668,8 +1672,8 @@ public:
 
             for (int ver = oldestAllowedDeploymentTarget; ver <= currentSDKVersion; ++ver)
             {
-                if (sdk == getSDKName (ver) && sdkRoot != nullptr) *sdkRoot = String ("macosx10." + String (ver));
-                if (sdkCompat == getSDKName (ver))   deploymentTarget = "10." + String (ver);
+                if (sdk.isNotEmpty() && (sdk == getSDKName (ver) && sdkRoot != nullptr)) *sdkRoot = String ("macosx10." + String (ver));
+                if (sdkCompat == getSDKName (ver))                                       deploymentTarget = "10." + String (ver);
             }
 
             return deploymentTarget;
@@ -1845,8 +1849,15 @@ private:
             topLevelGroupIDs.add (addEntitlementsFile (entitlements));
 
         for (auto& group : getAllGroups())
+        {
             if (group.getNumChildren() > 0)
-                topLevelGroupIDs.add (addProjectItem (group));
+            {
+                auto groupID = addProjectItem (group);
+
+                if (groupID.isNotEmpty())
+                    topLevelGroupIDs.add (groupID);
+            }
+        }
     }
 
     void addExtraGroupsToProject (StringArray& topLevelGroupIDs) const
@@ -2669,11 +2680,16 @@ private:
             StringArray childIDs;
             for (int i = 0; i < projectItem.getNumChildren(); ++i)
             {
-                auto childID = addProjectItem (projectItem.getChild(i));
+                auto child = projectItem.getChild (i);
 
-                if (childID.isNotEmpty())
+                auto childID = addProjectItem (child);
+
+                if (childID.isNotEmpty() && ! child.shouldBeAddedToXcodeResources())
                     childIDs.add (childID);
             }
+
+            if (childIDs.isEmpty())
+                return {};
 
             return addGroup (projectItem, childIDs);
         }

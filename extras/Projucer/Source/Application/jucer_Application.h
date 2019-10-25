@@ -32,7 +32,10 @@
 #include "../CodeEditor/jucer_SourceCodeEditor.h"
 #include "../Utility/UI/jucer_ProjucerLookAndFeel.h"
 #include "../Licenses/jucer_LicenseController.h"
-#include "jucer_ProjucerAnalytics.h"
+
+#if JUCE_MODULE_AVAILABLE_juce_analytics
+ #include "jucer_ProjucerAnalytics.h"
+#endif
 
 struct ChildProcessCache;
 
@@ -90,7 +93,7 @@ public:
     //==============================================================================
     void createNewProject();
     void createNewProjectFromClipboard();
-    void updateNewlyOpenedProject (Project&);
+    void createNewPIP();
     void askUserToOpenFile();
     bool openFile (const File&);
     bool closeAllDocuments (bool askUserToSave);
@@ -110,6 +113,8 @@ public:
 
     void showPathsWindow (bool highlightJUCEPath = false);
     void showEditorColourSchemeWindow();
+
+    void showPIPCreatorWindow();
 
     void launchForumBrowser();
     void launchModulesBrowser();
@@ -147,7 +152,7 @@ public:
     ScopedPointer<ApplicationCommandManager> commandManager;
 
     ScopedPointer<Component> utf8Window, svgPathWindow, aboutWindow, applicationUsageDataWindow,
-                             pathsWindow, editorColourSchemeWindow;
+                             pathsWindow, editorColourSchemeWindow, pipCreatorWindow;
 
     ScopedPointer<FileLogger> logger;
 
@@ -174,14 +179,15 @@ private:
     void deleteTemporaryFiles() const noexcept;
 
     void createExamplesPopupMenu (PopupMenu&) noexcept;
-    Array<File> getSortedExampleDirectories() const noexcept;
+    Array<File> getSortedExampleDirectories() noexcept;
     Array<File> getSortedExampleFilesInDirectory (const File&) const noexcept;
 
     bool findWindowAndOpenPIP (const File&);
 
+    File getJUCEExamplesDirectoryPathFromGlobal() noexcept;
     void findAndLaunchExample (int);
-    File findDemoRunnerExecutable() const noexcept;
-    File findDemoRunnerProject() const noexcept;
+    File findDemoRunnerExecutable() noexcept;
+    File findDemoRunnerProject() noexcept;
     void launchDemoRunner();
 
     int numExamples = 0;

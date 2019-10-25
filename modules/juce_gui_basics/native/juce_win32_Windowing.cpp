@@ -807,7 +807,7 @@ struct OnScreenKeyboard   : public DeletedAtShutdown,
         startTimer (10);
     }
 
-    JUCE_DECLARE_SINGLETON_SINGLETHREADED (OnScreenKeyboard, true)
+    JUCE_DECLARE_SINGLETON_SINGLETHREADED (OnScreenKeyboard, false)
 
 private:
     OnScreenKeyboard()

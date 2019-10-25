@@ -98,21 +98,20 @@ public:
 
     virtual ~JuceAudioProcessor() {}
 
-    AudioProcessor* get() const noexcept      { return audioProcessor; }
+    AudioProcessor* get() const noexcept      { return audioProcessor.get(); }
 
     JUCE_DECLARE_VST3_COM_QUERY_METHODS
     JUCE_DECLARE_VST3_COM_REF_METHODS
 
     //==============================================================================
-    #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
-    inline Vst::ParamID getVSTParamIDForIndex (int paramIndex) const noexcept   { return static_cast<Vst::ParamID> (paramIndex); }
-   #else
     inline Vst::ParamID getVSTParamIDForIndex (int paramIndex) const noexcept
     {
-        return isUsingManagedParameters() ? vstParamIDs.getReference (paramIndex)
-                                          : static_cast<Vst::ParamID> (paramIndex);
+       #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
+        return static_cast<Vst::ParamID> (paramIndex);
+       #else
+        return vstParamIDs.getReference (paramIndex);
+       #endif
     }
-   #endif
 
     AudioProcessorParameter* getParamForVSTParamID (Vst::ParamID paramID) const noexcept
     {
@@ -169,7 +168,8 @@ private:
         if (bypassParameter == nullptr)
         {
             vst3WrapperProvidedBypassParam = true;
-            bypassParameter = ownedBypassParameter = new AudioParameterBool ("byps", "Bypass", false, {}, {}, {});
+            ownedBypassParameter.reset (new AudioParameterBool ("byps", "Bypass", false, {}, {}, {}));
+            bypassParameter = ownedBypassParameter.get();
         }
 
         // if the bypass parameter is not part of the exported parameters that the plug-in supports
@@ -204,6 +204,10 @@ private:
     Vst::ParamID generateVSTParamIDForParam (AudioProcessorParameter* param)
     {
         auto juceParamID = LegacyAudioParameter::getParamID (param, false);
+
+      #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
+        return static_cast<Vst::ParamID> (juceParamID.getIntValue());
+      #else
         auto paramHash = static_cast<Vst::ParamID> (juceParamID.hashCode());
 
        #if JUCE_USE_STUDIO_ONE_COMPATIBLE_PARAMETERS
@@ -211,19 +215,19 @@ private:
         paramHash &= ~(1 << (sizeof (Vst::ParamID) * 8 - 1));
        #endif
 
-        return isUsingManagedParameters() ? paramHash
-                                          : static_cast<Vst::ParamID> (juceParamID.getIntValue());
+        return paramHash;
+      #endif
     }
 
     //==============================================================================
     Atomic<int> refCount;
-    ScopedPointer<AudioProcessor> audioProcessor;
+    std::unique_ptr<AudioProcessor> audioProcessor;
     ScopedJuceInitialiser_GUI libraryInitialiser;
 
     //==============================================================================
     LegacyAudioParametersWrapper juceParameters;
     HashMap<int32, AudioProcessorParameter*> paramMap;
-    ScopedPointer<AudioProcessorParameter> ownedBypassParameter;
+    std::unique_ptr<AudioProcessorParameter> ownedBypassParameter;
 
     JuceAudioProcessor() = delete;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuceAudioProcessor)
@@ -388,7 +392,11 @@ public:
 
         void toString (Vst::ParamValue value, Vst::String128 result) const override
         {
-            toString128 (result, param.getText ((float) value, 128));
+            if (LegacyAudioParameter::isLegacy (&param))
+                // remain backward-compatible with old JUCE code
+                toString128 (result, param.getCurrentValueAsText());
+            else
+                toString128 (result, param.getText ((float) value, 128));
         }
 
         bool fromString (const Vst::TChar* text, Vst::ParamValue& outValueNormalized) const override
@@ -717,7 +725,7 @@ private:
 
             if (parameters.getParameterCount() <= 0)
             {
-                #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
+               #if JUCE_FORCE_USE_LEGACY_PARAM_IDS
                 const bool forceLegacyParamIDs = true;
                #else
                 const bool forceLegacyParamIDs = false;
@@ -789,7 +797,7 @@ private:
           : Vst::EditorView (&ec, nullptr),
             owner (&ec), pluginInstance (p)
         {
-            component = new ContentWrapperComponent (*this, p);
+            component.reset (new ContentWrapperComponent (*this, p));
         }
 
         tresult PLUGIN_API queryInterface (const TUID targetIID, void** obj) override
@@ -822,7 +830,7 @@ private:
                 return kResultFalse;
 
             if (component == nullptr)
-                component = new ContentWrapperComponent (*this, pluginInstance);
+                component.reset (new ContentWrapperComponent (*this, pluginInstance));
 
            #if JUCE_WINDOWS
             component->addToDesktop (0, parent);
@@ -830,7 +838,7 @@ private:
             component->setVisible (true);
            #else
             isNSView = (strcmp (type, kPlatformTypeNSView) == 0);
-            macHostWindow = juce::attachComponentToWindowRefVST (component, parent, isNSView);
+            macHostWindow = juce::attachComponentToWindowRefVST (component.get(), parent, isNSView);
            #endif
 
             component->resizeHostWindow();
@@ -853,7 +861,7 @@ private:
                #else
                 if (macHostWindow != nullptr)
                 {
-                    juce::detachComponentFromWindowRefVST (component, macHostWindow, isNSView);
+                    juce::detachComponentFromWindowRefVST (component.get(), macHostWindow, isNSView);
                     macHostWindow = nullptr;
                 }
                #endif
@@ -912,8 +920,8 @@ private:
                 if (auto* editor = component->pluginEditor.get())
                 {
                     // checkSizeConstraint
-                    auto juceRect = editor->getLocalArea (component, Rectangle<int>::leftTopRightBottom (rectToCheck->left, rectToCheck->top,
-                                                                                                         rectToCheck->right, rectToCheck->bottom));
+                    auto juceRect = editor->getLocalArea (component.get(), Rectangle<int>::leftTopRightBottom (rectToCheck->left, rectToCheck->top,
+                                                                                                               rectToCheck->right, rectToCheck->bottom));
                     if (auto* constrainer = editor->getConstrainer())
                     {
                         Rectangle<int> limits (0, 0, constrainer->getMaximumWidth(), constrainer->getMaximumHeight());
@@ -972,7 +980,7 @@ private:
 
                 if (pluginEditor != nullptr)
                 {
-                    addAndMakeVisible (pluginEditor);
+                    addAndMakeVisible (pluginEditor.get());
 
                     pluginEditor->setTopLeftPosition (0, 0);
                     lastBounds = getSizeToContainChild();
@@ -991,7 +999,7 @@ private:
                 if (pluginEditor != nullptr)
                 {
                     PopupMenu::dismissAllActiveMenus();
-                    pluginEditor->processor.editorBeingDeleted (pluginEditor);
+                    pluginEditor->processor.editorBeingDeleted (pluginEditor.get());
                 }
             }
 
@@ -1003,7 +1011,7 @@ private:
             juce::Rectangle<int> getSizeToContainChild()
             {
                 if (pluginEditor != nullptr)
-                    return getLocalArea (pluginEditor, pluginEditor->getLocalBounds());
+                    return getLocalArea (pluginEditor.get(), pluginEditor->getLocalBounds());
 
                 return {};
             }
@@ -1088,7 +1096,7 @@ private:
                 }
             }
 
-            ScopedPointer<AudioProcessorEditor> pluginEditor;
+            std::unique_ptr<AudioProcessorEditor> pluginEditor;
 
         private:
             JuceVST3Editor& owner;
@@ -1104,7 +1112,7 @@ private:
         ComSmartPtr<JuceVST3EditController> owner;
         AudioProcessor& pluginInstance;
 
-        ScopedPointer<ContentWrapperComponent> component;
+        std::unique_ptr<ContentWrapperComponent> component;
         friend struct ContentWrapperComponent;
 
        #if JUCE_MAC

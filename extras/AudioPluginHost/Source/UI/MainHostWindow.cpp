@@ -84,10 +84,10 @@ MainHostWindow::MainHostWindow()
     RuntimePermissions::request (RuntimePermissions::recordAudio,
                                  [safeThis = SafePointer<MainHostWindow> (this)] (bool granted) mutable
                                  {
-                                     ScopedPointer<XmlElement> savedAudioState (getAppProperties().getUserSettings()
-                                                                                ->getXmlValue ("audioDeviceState"));
+                                     std::unique_ptr<XmlElement> savedAudioState (getAppProperties().getUserSettings()
+                                                                                  ->getXmlValue ("audioDeviceState"));
 
-                                     safeThis->deviceManager.initialise (granted ? 256 : 0, 256, savedAudioState, true);
+                                     safeThis->deviceManager.initialise (granted ? 256 : 0, 256, savedAudioState.get(), true);
                                  });
 
    #if JUCE_IOS || JUCE_ANDROID
@@ -98,9 +98,9 @@ MainHostWindow::MainHostWindow()
     centreWithSize (800, 600);
    #endif
 
-    graphHolder = new GraphDocumentComponent (formatManager, deviceManager, knownPluginList);
+    graphHolder.reset (new GraphDocumentComponent (formatManager, deviceManager, knownPluginList));
 
-    setContentNonOwned (graphHolder, false);
+    setContentNonOwned (graphHolder.get(), false);
 
     restoreWindowStateFromString (getAppProperties().getUserSettings()->getValue ("mainWindowPos"));
 
@@ -109,7 +109,7 @@ MainHostWindow::MainHostWindow()
     InternalPluginFormat internalFormat;
     internalFormat.getAllTypes (internalTypes);
 
-    ScopedPointer<XmlElement> savedPluginList (getAppProperties().getUserSettings()->getXmlValue ("pluginList"));
+    std::unique_ptr<XmlElement> savedPluginList (getAppProperties().getUserSettings()->getXmlValue ("pluginList"));
 
     if (savedPluginList != nullptr)
         knownPluginList.recreateFromXml (*savedPluginList);
@@ -220,15 +220,15 @@ void MainHostWindow::changeListenerCallback (ChangeBroadcaster* changed)
 
         // save the plugin list every time it gets changed, so that if we're scanning
         // and it crashes, we've still saved the previous ones
-        ScopedPointer<XmlElement> savedPluginList (knownPluginList.createXml());
+        std::unique_ptr<XmlElement> savedPluginList (knownPluginList.createXml());
 
         if (savedPluginList != nullptr)
         {
-            getAppProperties().getUserSettings()->setValue ("pluginList", savedPluginList);
+            getAppProperties().getUserSettings()->setValue ("pluginList", savedPluginList.get());
             getAppProperties().saveIfNeeded();
         }
     }
-    else if (graphHolder != nullptr && changed == graphHolder->graph)
+    else if (graphHolder != nullptr && changed == graphHolder->graph.get())
     {
         auto title = JUCEApplication::getInstance()->getApplicationName();
         auto f = graphHolder->graph->getFile();
@@ -506,7 +506,7 @@ bool MainHostWindow::perform (const InvocationInfo& info)
 
     case CommandIDs::showPluginListEditor:
         if (pluginListWindow == nullptr)
-            pluginListWindow = new PluginListWindow (*this, formatManager);
+            pluginListWindow.reset (new PluginListWindow (*this, formatManager));
 
         pluginListWindow->toFront (true);
         break;
@@ -577,9 +577,9 @@ void MainHostWindow::showAudioSettings()
                          ModalCallbackFunction::create
                          ([safeThis = SafePointer<MainHostWindow> (this)] (int)
                          {
-                             ScopedPointer<XmlElement> audioState (safeThis->deviceManager.createStateXml());
+                             std::unique_ptr<XmlElement> audioState (safeThis->deviceManager.createStateXml());
 
-                             getAppProperties().getUserSettings()->setValue ("audioDeviceState", audioState);
+                             getAppProperties().getUserSettings()->setValue ("audioDeviceState", audioState.get());
                              getAppProperties().getUserSettings()->saveIfNeeded();
 
                              if (safeThis->graphHolder != nullptr)

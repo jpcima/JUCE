@@ -1069,7 +1069,7 @@ public:
             if (auto* ed = processor->createEditorIfNeeded())
             {
                 vstEffect.flags |= vstEffectFlagHasEditor;
-                editorComp = new EditorCompWrapper (*this, *ed);
+                editorComp.reset (new EditorCompWrapper (*this, *ed));
 
                #if ! (JUCE_MAC || JUCE_IOS)
                 ed->setScaleFactor (editorScaleFactor);
@@ -1217,7 +1217,7 @@ public:
 
         ~EditorCompWrapper()
         {
-            deleteAllChildren(); // note that we can't use a ScopedPointer because the editor may
+            deleteAllChildren(); // note that we can't use a std::unique_ptr because the editor may
                                  // have been transferred to another parent which takes over ownership.
         }
 
@@ -1478,7 +1478,7 @@ private:
     VstEffectInterface vstEffect;
     juce::MemoryBlock chunkMemory;
     juce::uint32 chunkMemoryTime = 0;
-    ScopedPointer<EditorCompWrapper> editorComp;
+    std::unique_ptr<EditorCompWrapper> editorComp;
     VstEditorBounds editorBounds;
     MidiBuffer midiEvents;
     VSTMidiEventList outgoingEvents;
@@ -2033,6 +2033,9 @@ private:
 
         if (matches ("hasCockosExtensions"))
             return (int32) 0xbeef0000;
+
+        if (auto callbackHandler = dynamic_cast<VSTCallbackHandler*> (processor))
+            return callbackHandler->handleVstPluginCanDo (args.index, args.value, args.ptr, args.opt);
 
         return 0;
     }

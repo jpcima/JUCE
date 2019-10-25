@@ -91,12 +91,12 @@ public:
     void handleRedoInEditor (const String& className);
     void handleMissingSystemHeaders();
 
-    typedef ReferenceCountedObjectPtr<CompileEngineChildProcess> Ptr;
+    using Ptr = ReferenceCountedObjectPtr<CompileEngineChildProcess>;
 
 private:
     //==============================================================================
     class ChildProcess;
-    ScopedPointer<ChildProcess> process, runningAppProcess;
+    std::unique_ptr<ChildProcess> process, runningAppProcess;
     ClassDatabase::ClassList lastComponentList;
 
     struct Editor;

@@ -53,7 +53,7 @@ class ComponentTransformsDemo  : public Component
 public:
     ComponentTransformsDemo()
     {
-        content.reset (new WidgetsDemo());
+        content.reset (new WidgetsDemo (true));
         addAndMakeVisible (content.get());
         content->setSize (750, 500);
 
@@ -94,7 +94,7 @@ public:
     }
 
 private:
-    ScopedPointer<Component> content;
+    std::unique_ptr<Component> content;
 
     struct CornerDragger  : public Component
     {

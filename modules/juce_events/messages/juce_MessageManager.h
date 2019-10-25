@@ -182,7 +182,7 @@ public:
         virtual void messageCallback() = 0;
         bool post();
 
-        typedef ReferenceCountedObjectPtr<MessageBase> Ptr;
+        using Ptr = ReferenceCountedObjectPtr<MessageBase>;
 
         JUCE_DECLARE_NON_COPYABLE (MessageBase)
     };
@@ -320,7 +320,7 @@ private:
     friend class QuitMessage;
     friend class MessageManagerLock;
 
-    ScopedPointer<ActionBroadcaster> broadcaster;
+    std::unique_ptr<ActionBroadcaster> broadcaster;
     Atomic<int> quitMessagePosted { 0 }, quitMessageReceived { 0 };
     Thread::ThreadID messageThreadId;
     Atomic<Thread::ThreadID> threadWithLock;

@@ -49,14 +49,14 @@ public:
         options.filenameSuffix      = "settings";
         options.osxLibrarySubFolder = "Preferences";
 
-        appProperties = new ApplicationProperties();
+        appProperties.reset (new ApplicationProperties());
         appProperties->setStorageParameters (options);
 
-        mainWindow = new MainHostWindow();
+        mainWindow.reset (new MainHostWindow());
         mainWindow->setUsingNativeTitleBar (true);
 
         commandManager.registerAllCommandsForTarget (this);
-        commandManager.registerAllCommandsForTarget (mainWindow);
+        commandManager.registerAllCommandsForTarget (mainWindow.get());
 
         mainWindow->menuItemsChanged();
 
@@ -137,10 +137,10 @@ public:
     bool moreThanOneInstanceAllowed() override       { return true; }
 
     ApplicationCommandManager commandManager;
-    ScopedPointer<ApplicationProperties> appProperties;
+    std::unique_ptr<ApplicationProperties> appProperties;
 
 private:
-    ScopedPointer<MainHostWindow> mainWindow;
+    std::unique_ptr<MainHostWindow> mainWindow;
 };
 
 static PluginHostApp& getApp()                    { return *dynamic_cast<PluginHostApp*>(JUCEApplication::getInstance()); }

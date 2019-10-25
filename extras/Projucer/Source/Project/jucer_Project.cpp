@@ -28,6 +28,7 @@
 #include "jucer_Project.h"
 #include "../ProjectSaving/jucer_ProjectSaver.h"
 #include "../Application/jucer_Application.h"
+#include "../LiveBuildEngine/jucer_CompileEngineSettings.h"
 
 namespace
 {
@@ -66,6 +67,8 @@ Project::Project (const File& f)
     getModules().sortAlphabetically();
 
     projectRoot.addListener (this);
+
+    compileEngineSettings.reset (new CompileEngineSettings (projectRoot));
 
     setChangedFlag (false);
     modificationTime = getFile().getLastModificationTime();
@@ -185,6 +188,10 @@ void Project::initialiseProjectValues()
 {
     projectNameValue.referTo         (projectRoot, Ids::name,             getUndoManager(), "JUCE Project");
     projectUIDValue.referTo          (projectRoot, Ids::ID,               getUndoManager(), createAlphaNumericUID());
+
+    if (projectUIDValue.isUsingDefault())
+        projectUIDValue = projectUIDValue.getDefault();
+
     projectTypeValue.referTo         (projectRoot, Ids::projectType,      getUndoManager(), ProjectType_GUIApp::getTypeName());
     versionValue.referTo             (projectRoot, Ids::version,          getUndoManager(), "1.0.0");
     bundleIdentifierValue.referTo    (projectRoot, Ids::bundleIdentifier, getUndoManager(), getDefaultBundleIdentifierString());
@@ -227,7 +234,8 @@ void Project::initialiseProjectValues()
 
 void Project::initialiseAudioPluginValues()
 {
-    pluginFormatsValue.referTo               (projectRoot, Ids::pluginFormats,              getUndoManager(), Array<var> (Ids::buildVST.toString(), Ids::buildAU.toString()), ",");
+    pluginFormatsValue.referTo               (projectRoot, Ids::pluginFormats,              getUndoManager(),
+                                              Array<var> (Ids::buildVST.toString(), Ids::buildAU.toString(), Ids::buildStandalone.toString()), ",");
     pluginCharacteristicsValue.referTo       (projectRoot, Ids::pluginCharacteristicsValue, getUndoManager(), Array<var> (), ",");
 
     pluginNameValue.referTo                  (projectRoot, Ids::pluginName,                 getUndoManager(), getProjectNameString());
@@ -380,8 +388,6 @@ void Project::updatePluginCategories()
             pluginAAXCategoryValue = aaxCategory;
         else if (getAllAAXCategoryStrings().contains (aaxCategory))
             pluginAAXCategoryValue = Array<var> (getAllAAXCategoryVars()[getAllAAXCategoryStrings().indexOf (aaxCategory)]);
-        else
-            pluginAAXCategoryValue.resetToDefault();
     }
 
     {
@@ -391,8 +397,6 @@ void Project::updatePluginCategories()
             pluginRTASCategoryValue = rtasCategory;
         else if (getAllRTASCategoryStrings().contains (rtasCategory))
             pluginRTASCategoryValue = Array<var> (getAllRTASCategoryVars()[getAllRTASCategoryStrings().indexOf (rtasCategory)]);
-        else
-            pluginRTASCategoryValue.resetToDefault();
     }
 
     {
@@ -547,7 +551,7 @@ static void forgetRecentFile (const File& file)
 //==============================================================================
 Result Project::loadDocument (const File& file)
 {
-    ScopedPointer<XmlElement> xml (XmlDocument::parse (file));
+    std::unique_ptr<XmlElement> xml (XmlDocument::parse (file));
 
     if (xml == nullptr || ! xml->hasTagName (Ids::JUCERPROJECT.toString()))
         return Result::fail ("Not a valid Jucer project!");
@@ -578,6 +582,8 @@ Result Project::loadDocument (const File& file)
 
     if (! ProjucerApplication::getApp().isRunningCommandLine)
         warnAboutOldProjucerVersion();
+
+    compileEngineSettings.reset (new CompileEngineSettings (projectRoot));
 
     return Result::ok();
 }
@@ -659,7 +665,7 @@ void Project::moveTemporaryDirectory (const File& newParentDirectory)
 
 bool Project::saveProjectRootToFile()
 {
-    ScopedPointer<XmlElement> xml (projectRoot.createXml());
+    std::unique_ptr<XmlElement> xml (projectRoot.createXml());
 
     if (xml == nullptr)
     {
@@ -1610,6 +1616,13 @@ static String getVST3CategoryStringFromSelection (Array<var> selected) noexcept
     for (auto& category : selected)
         categories.add (category);
 
+    // "Fx" and "Instrument" should come first and if both are present prioritise "Fx"
+    if (categories.contains ("Instrument"))
+        categories.move (categories.indexOf ("Instrument"), 0);
+
+    if (categories.contains ("Fx"))
+        categories.move (categories.indexOf ("Fx"), 0);
+
     return categories.joinIntoString ("|");
 }
 
@@ -1744,9 +1757,9 @@ Array<var> Project::getDefaultVSTCategories() const noexcept
 
 StringArray Project::getAllVST3CategoryStrings() noexcept
 {
-    static StringArray vst3CategoryStrings { "Fx", "Instrument", "Spatial", "Analyzer", "Delay", "Distortion", "EQ", "Filter", "Generator", "Mastering",
-                                             "Modulation", "Pitch Shift", "Restoration", "Reverb", "Surround", "Tools", "Network", "Drum", "Sampler",
-                                             "Synth", "External", "OnlyRT", "OnlyOfflineProcess", "NoOfflineProcess", "Up-Downmix" };
+    static StringArray vst3CategoryStrings { "Fx", "Instrument", "Analyzer", "Delay", "Distortion", "Drum", "Dynamics", "EQ", "External", "Filter",
+                                             "Generator", "Mastering", "Modulation", "Mono", "Network", "NoOfflineProcess", "OnlyOfflineProcess", "OnlyRT",
+                                             "Pitch Shift", "Restoration", "Reverb", "Sampler", "Spatial", "Stereo", "Surround", "Synth", "Tools", "Up-Downmix" };
 
     return vst3CategoryStrings;
 }
@@ -1819,7 +1832,7 @@ Array<var> Project::getDefaultRTASCategories() const noexcept
 EnabledModuleList& Project::getModules()
 {
     if (enabledModulesList == nullptr)
-        enabledModulesList = new EnabledModuleList (*this, projectRoot.getOrCreateChildWithName (Ids::MODULES, nullptr));
+        enabledModulesList.reset (new EnabledModuleList (*this, projectRoot.getOrCreateChildWithName (Ids::MODULES, nullptr)));
 
     return *enabledModulesList;
 }
@@ -1843,7 +1856,7 @@ ProjectExporter* Project::createExporter (int index)
 
 void Project::addNewExporter (const String& exporterName)
 {
-    ScopedPointer<ProjectExporter> exp (ProjectExporter::createNewExporter (*this, exporterName));
+    std::unique_ptr<ProjectExporter> exp (ProjectExporter::createNewExporter (*this, exporterName));
 
     exp->getTargetLocationValue() = exp->getTargetLocationString()
                                        + getUniqueTargetFolderSuffixForExporter (exp->getName(), exp->getTargetLocationString());
@@ -1923,7 +1936,7 @@ bool Project::ExporterIterator::next()
     if (++index >= project.getNumExporters())
         return false;
 
-    exporter = project.createExporter (index);
+    exporter.reset (project.createExporter (index));
 
     if (exporter == nullptr)
     {

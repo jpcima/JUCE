@@ -575,9 +575,9 @@ struct ModuleHandle    : public ReferenceCountedObject
     File file;
     MainCall moduleMain, customMain = {};
     String pluginName;
-    ScopedPointer<XmlElement> vstXml;
+    std::unique_ptr<XmlElement> vstXml;
 
-    typedef ReferenceCountedObjectPtr<ModuleHandle> Ptr;
+    using Ptr = ReferenceCountedObjectPtr<ModuleHandle>;
 
     static Array<ModuleHandle*>& getActiveModules()
     {
@@ -656,11 +656,11 @@ struct ModuleHandle    : public ReferenceCountedObject
 
         if (moduleMain != nullptr)
         {
-            vstXml = XmlDocument::parse (file.withFileExtension ("vstxml"));
+            vstXml.reset (XmlDocument::parse (file.withFileExtension ("vstxml")));
 
            #if JUCE_WINDOWS
             if (vstXml == nullptr)
-                vstXml = XmlDocument::parse (getDLLResource (file, "VSTXML", 1));
+                vstXml.reset (XmlDocument::parse (getDLLResource (file, "VSTXML", 1)));
            #endif
         }
 
@@ -913,6 +913,10 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         String getName (int maximumStringLength) const override
         {
+            if (name.isEmpty())
+                return pluginInstance.getTextForOpcode (getParameterIndex(),
+                                                        plugInOpcodeGetParameterName);
+
             if (name.length() <= maximumStringLength)
                 return name;
 
@@ -930,7 +934,9 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         String getLabel() const override
         {
-            return label;
+            return label.isEmpty() ? pluginInstance.getTextForOpcode (getParameterIndex(),
+                                                                      plugInOpcodeGetParameterLabel)
+                                   : label;
         }
 
         bool isAutomatable() const override
@@ -986,10 +992,10 @@ struct VSTPluginInstance     : public AudioPluginInstance,
 
         for (int i = 0; i < vstEffect->numParameters; ++i)
         {
-            String paramName (getTextForOpcode (i, plugInOpcodeGetParameterName));
+            String paramName;
             Array<String> shortParamNames;
             float defaultValue = 0;
-            String label (getTextForOpcode (i, plugInOpcodeGetParameterLabel));
+            String label;
             bool isAutomatable = dispatch (plugInOpcodeIsParameterAutomatable, i, 0, 0, 0) != 0;
             bool isDiscrete = false;
             int numSteps = AudioProcessor::getDefaultNumParameterSteps();
@@ -1061,7 +1067,7 @@ struct VSTPluginInstance     : public AudioPluginInstance,
                                             valueType));
         }
 
-        vstSupportsBypass = pluginCanDo ("bypass");
+        vstSupportsBypass = (pluginCanDo ("bypass") > 0);
         setRateAndBufferSizeDetails (sampleRateToUse, blockSizeToUse);
     }
 
@@ -1943,14 +1949,20 @@ struct VSTPluginInstance     : public AudioPluginInstance,
     VstEffectInterface* vstEffect;
     ModuleHandle::Ptr vstModule;
 
-    ScopedPointer<VSTPluginFormat::ExtraFunctions> extraFunctions;
+    std::unique_ptr<VSTPluginFormat::ExtraFunctions> extraFunctions;
     bool usesCocoaNSView = false;
 
 private:
     //==============================================================================
     struct VST2BypassParameter    : Parameter
     {
-        VST2BypassParameter (VSTPluginInstance& effectToUse)   : parent (effectToUse) {}
+        VST2BypassParameter (VSTPluginInstance& effectToUse)
+            : parent (effectToUse),
+              onStrings (TRANS("on"), TRANS("yes"), TRANS("true")),
+              offStrings (TRANS("off"), TRANS("no"), TRANS("false")),
+              values (TRANS("Off"), TRANS("On"))
+        {
+        }
 
         void setValue (float newValue) override
         {
@@ -1988,9 +2000,7 @@ private:
 
         VSTPluginInstance& parent;
         bool currentValue = false;
-        StringArray onStrings  { TRANS("on"),  TRANS("yes"), TRANS("true") };
-        StringArray offStrings { TRANS("off"), TRANS("no"),  TRANS("false") };
-        StringArray values { TRANS("Off"), TRANS("On") };
+        StringArray onStrings, offStrings, values;
     };
 
     //==============================================================================
@@ -2011,9 +2021,9 @@ private:
 
     AudioBuffer<double> tmpBufferDouble;
     HeapBlock<double*> channelBufferDouble;
-    ScopedPointer<VST2BypassParameter> bypassParam;
+    std::unique_ptr<VST2BypassParameter> bypassParam;
 
-    ScopedPointer<VSTXMLInfo> xmlInfo;
+    std::unique_ptr<VSTXMLInfo> xmlInfo;
 
     static pointer_sized_int handleCanDo (const char* name)
     {
@@ -3290,10 +3300,10 @@ private:
     };
 
     friend struct CarbonWrapperComponent;
-    ScopedPointer<CarbonWrapperComponent> carbonWrapper;
+    std::unique_ptr<CarbonWrapperComponent> carbonWrapper;
    #endif
 
-    ScopedPointer<AutoResizingNSViewComponentWithParent> cocoaWrapper;
+    std::unique_ptr<AutoResizingNSViewComponentWithParent> cocoaWrapper;
 
     void resized() override
     {
@@ -3371,7 +3381,7 @@ void VSTPluginFormat::findAllTypesForFile (OwnedArray<PluginDescription>& result
     desc.fileOrIdentifier = fileOrIdentifier;
     desc.uid = 0;
 
-    ScopedPointer<VSTPluginInstance> instance (createAndUpdateDesc (*this, desc));
+    std::unique_ptr<VSTPluginInstance> instance (createAndUpdateDesc (*this, desc));
 
     if (instance == nullptr)
         return;
@@ -3399,7 +3409,7 @@ void VSTPluginFormat::findAllTypesForFile (OwnedArray<PluginDescription>& result
 
             aboutToScanVSTShellPlugin (desc);
 
-            ScopedPointer<VSTPluginInstance> shellInstance (createAndUpdateDesc (*this, desc));
+            std::unique_ptr<VSTPluginInstance> shellInstance (createAndUpdateDesc (*this, desc));
 
             if (shellInstance != nullptr)
             {
@@ -3420,7 +3430,7 @@ void VSTPluginFormat::createPluginInstance (const PluginDescription& desc,
                                             void* userData,
                                             void (*callback) (void*, AudioPluginInstance*, const String&))
 {
-    ScopedPointer<VSTPluginInstance> result;
+    std::unique_ptr<VSTPluginInstance> result;
 
     if (fileMightContainThisPluginType (desc.fileOrIdentifier))
     {
@@ -3597,7 +3607,7 @@ AudioPluginInstance* VSTPluginFormat::createCustomVSTFromMainCall (void* entryPo
 
     if (module->open())
     {
-        ScopedPointer<VSTPluginInstance> result (VSTPluginInstance::create (module, initialSampleRate, initialBufferSize));
+        std::unique_ptr<VSTPluginInstance> result (VSTPluginInstance::create (module, initialSampleRate, initialBufferSize));
 
         if (result != nullptr)
             if (result->initialiseEffect (initialSampleRate, initialBufferSize))
@@ -3609,7 +3619,7 @@ AudioPluginInstance* VSTPluginFormat::createCustomVSTFromMainCall (void* entryPo
 
 void VSTPluginFormat::setExtraFunctions (AudioPluginInstance* plugin, ExtraFunctions* functions)
 {
-    ScopedPointer<ExtraFunctions> f (functions);
+    std::unique_ptr<ExtraFunctions> f (functions);
 
     if (auto* vst = dynamic_cast<VSTPluginInstance*> (plugin))
         std::swap (vst->extraFunctions, f);

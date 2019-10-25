@@ -50,7 +50,7 @@ public:
             Image image (Image::ARGB, 200, 200, true);
             Graphics g (image);
 
-            ScopedPointer<Drawable> svgDrawable (Drawable::createFromImageData (iconData, (size_t) iconDataSize));
+            std::unique_ptr<Drawable> svgDrawable (Drawable::createFromImageData (iconData, (size_t) iconDataSize));
 
             svgDrawable->drawWithin (g, image.getBounds().toFloat(), RectanglePlacement::fillDestination, 1.0f);
 
@@ -234,7 +234,7 @@ public:
         BuildConfiguration (Project& project, const ValueTree& configNode, const ProjectExporter&);
         ~BuildConfiguration();
 
-        typedef ReferenceCountedObjectPtr<BuildConfiguration> Ptr;
+        using Ptr = ReferenceCountedObjectPtr<BuildConfiguration>;
 
         //==============================================================================
         virtual void createConfigProperties (PropertyListBuilder&) = 0;

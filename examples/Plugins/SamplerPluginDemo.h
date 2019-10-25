@@ -2006,8 +2006,7 @@ private:
           loopKindLabel            { {}, "Looping Mode" };
 
 
-    FileChooser fileChooser { "Select a file to load...",
-                              File::nonexistent,
+    FileChooser fileChooser { "Select a file to load...", File(),
                               dataModel.getAudioFormatManager().getWildcardForAllFormats() };
 
     UndoManager* undoManager;
@@ -2065,7 +2064,7 @@ public:
     {
         if (auto* asset = createAssetInputStream ("cello.wav"))
         {
-            ScopedPointer<InputStream> inputStream (asset);
+            std::unique_ptr<InputStream> inputStream (asset);
             inputStream->readIntoMemoryBlock (mb);
 
             readerFactory.reset (new MemoryAudioFormatReaderFactory (mb.getData(), mb.getSize()));

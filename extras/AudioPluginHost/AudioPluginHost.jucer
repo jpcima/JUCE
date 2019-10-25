@@ -2,7 +2,7 @@
 
 <JUCERPROJECT id="NTe0XB0ij" name="AudioPluginHost" projectType="guiapp" version="1.0.0"
               juceFolder="../../../juce" vstFolderMac="~/SDKs/vstsdk2.4" vstFolderPC="c:\SDKs\vstsdk2.4"
-              bundleIdentifier="com.roli.juce.pluginhost" jucerVersion="5.3.1"
+              bundleIdentifier="com.roli.juce.pluginhost" jucerVersion="5.3.2"
               companyName="ROLI Ltd." displaySplashScreen="0" reportAppUsage="0"
               companyCopyright="ROLI Ltd.">
   <EXPORTFORMATS>
@@ -211,7 +211,8 @@
   <JUCEOPTIONS JUCE_WASAPI="1" JUCE_DIRECTSOUND="1" JUCE_ALSA="1" JUCE_QUICKTIME="disabled"
                JUCE_USE_FLAC="0" JUCE_USE_OGGVORBIS="0" JUCE_USE_CDBURNER="0"
                JUCE_USE_CDREADER="0" JUCE_USE_CAMERA="0" JUCE_PLUGINHOST_VST="1"
-               JUCE_PLUGINHOST_AU="1" JUCE_WEB_BROWSER="0" JUCE_PLUGINHOST_VST3="1"/>
+               JUCE_PLUGINHOST_AU="1" JUCE_WEB_BROWSER="0" JUCE_PLUGINHOST_VST3="1"
+               JUCE_PLUGINHOST_LADSPA="1"/>
   <MODULES>
     <MODULE id="juce_audio_basics" showAllCode="1"/>
     <MODULE id="juce_audio_devices" showAllCode="1"/>
@@ -228,4 +229,8 @@
     <MODULE id="juce_opengl" showAllCode="1"/>
     <MODULE id="juce_video" showAllCode="1"/>
   </MODULES>
+  <LIVE_SETTINGS>
+    <OSX/>
+    <LINUX/>
+  </LIVE_SETTINGS>
 </JUCERPROJECT>

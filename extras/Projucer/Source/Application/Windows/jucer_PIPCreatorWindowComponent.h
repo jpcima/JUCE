@@ -63,7 +63,8 @@ class PIPCreatorWindowComponent    : public Component,
 public:
     PIPCreatorWindowComponent()
     {
-        setLookAndFeel (lf = new PIPCreatorLookAndFeel());
+        lf.reset (new PIPCreatorLookAndFeel());
+        setLookAndFeel (lf.get());
 
         addAndMakeVisible (propertyViewport);
         propertyViewport.setViewedComponent (&propertyGroup, false);
@@ -306,7 +307,7 @@ private:
     }
 
     //==============================================================================
-    ScopedPointer<LookAndFeel> lf;
+    std::unique_ptr<LookAndFeel> lf;
 
     Viewport propertyViewport;
     PropertyGroupComponent propertyGroup  { "PIP Creator", { getIcons().juceLogo, Colours::transparentBlack } };

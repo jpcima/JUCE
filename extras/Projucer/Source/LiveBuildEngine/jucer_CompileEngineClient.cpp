@@ -35,7 +35,8 @@
 #include "jucer_ProjectBuildInfo.h"
 #include "jucer_ClientServerMessages.h"
 #include "jucer_CompileEngineClient.h"
-#include "../LiveBuildEngine/jucer_CompileEngineServer.h"
+#include "jucer_CompileEngineServer.h"
+#include "jucer_CompileEngineSettings.h"
 
 #ifndef RUN_CLANG_IN_CHILD_PROCESS
  #error
@@ -213,8 +214,7 @@ public:
 
     void restartServer()
     {
-        server.reset();
-        server = new ClientIPC (owner);
+        server.reset (new ClientIPC (owner));
         sendRebuild();
     }
 
@@ -278,7 +278,7 @@ public:
         return true;
     }
 
-    ScopedPointer<ClientIPC> server;
+    std::unique_ptr<ClientIPC> server;
 
     bool openedOk = false;
     bool isRunningApp = false;
@@ -422,7 +422,7 @@ private:
     {
         auto liveModules = project.getProjectRoot().getChildWithName (Ids::MODULES);
 
-        ScopedPointer<XmlElement> xml (XmlDocument::parse (project.getFile()));
+        std::unique_ptr<XmlElement> xml (XmlDocument::parse (project.getFile()));
 
         if (xml == nullptr || ! xml->hasTagName (Ids::JUCERPROJECT.toString()))
             return false;
@@ -516,7 +516,7 @@ CompileEngineChildProcess::~CompileEngineChildProcess()
 void CompileEngineChildProcess::createProcess()
 {
     jassert (process == nullptr);
-    process = new ChildProcess (*this, project);
+    process.reset (new ChildProcess (*this, project));
 
     if (! process->openedOk)
         process.reset();
@@ -598,7 +598,7 @@ void CompileEngineChildProcess::killApp()
 
 void CompileEngineChildProcess::handleAppLaunched()
 {
-    runningAppProcess = process;
+    runningAppProcess.reset (process.release());
     runningAppProcess->isRunningApp = true;
     createProcess();
 }

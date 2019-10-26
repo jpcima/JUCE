@@ -155,7 +155,7 @@ public:
         }
     }
 
-    ~OggReader()
+    ~OggReader() override
     {
         ov_clear (&ovFile);
     }
@@ -328,7 +328,7 @@ public:
         }
     }
 
-    ~OggWriter()
+    ~OggWriter() override
     {
         if (ok)
         {

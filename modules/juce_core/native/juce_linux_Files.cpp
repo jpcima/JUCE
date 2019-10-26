@@ -189,22 +189,20 @@ static bool isFileExecutable (const String& filename)
 
 bool Process::openDocument (const String& fileName, const String& parameters)
 {
-    String cmdString (fileName.replace (" ", "\\ ",false));
+    auto cmdString = fileName.replace (" ", "\\ ", false);
     cmdString << " " << parameters;
 
-    if (/*URL::isProbablyAWebsiteURL (fileName)
-          ||*/ cmdString.startsWithIgnoreCase ("file:")
-         /*|| URL::isProbablyAnEmailAddress (fileName)*/
+    if (cmdString.startsWithIgnoreCase ("file:")
          || File::createFileWithoutCheckingPath (fileName).isDirectory()
          || ! isFileExecutable (fileName))
     {
-        // create a command that tries to launch a bunch of likely browsers
-        static const char* const browserNames[] = { "xdg-open", "/etc/alternatives/x-www-browser", "firefox", "mozilla",
-                                                    "google-chrome", "chromium-browser", "opera", "konqueror" };
         StringArray cmdLines;
 
-        for (int i = 0; i < numElementsInArray (browserNames); ++i)
-            cmdLines.add (String (browserNames[i]) + " " + cmdString.trim().quoted());
+        for (auto browserName : { "xdg-open", "/etc/alternatives/x-www-browser", "firefox", "mozilla",
+                                  "google-chrome", "chromium-browser", "opera", "konqueror" })
+        {
+            cmdLines.add (String (browserName) + " " + cmdString.trim());
+        }
 
         cmdString = cmdLines.joinIntoString (" || ");
     }
@@ -212,9 +210,9 @@ bool Process::openDocument (const String& fileName, const String& parameters)
     const char* const argv[4] = { "/bin/sh", "-c", cmdString.toUTF8(), nullptr };
 
 #if JUCE_USE_VFORK
-    const int cpid = vfork();
+    auto cpid = vfork();
 #else
-    const int cpid = fork();
+    auto cpid = fork();
 #endif
 
     if (cpid == 0)

@@ -918,28 +918,27 @@ void JUCE_API juce_threadEntryPoint (void*);
 extern JavaVM* androidJNIJavaVM;
 #endif
 
-static void* threadEntryProc (void* userData)
+extern "C" void* threadEntryProc (void*);
+extern "C" void* threadEntryProc (void* userData)
 {
-   #if JUCE_ANDROID
-
-    if (androidJNIJavaVM != nullptr)
-    {
-        JNIEnv* env;
-        androidJNIJavaVM->AttachCurrentThread (&env, nullptr);
-        setEnv (env);
-    }
-    else
-    {
-        // JNI_OnLoad was not called - make sure you load the JUCE shared library
-        // using System.load inside of Java
-        jassertfalse;
-    }
-   #endif
+    auto* myself = static_cast<Thread*> (userData);
 
     JUCE_AUTORELEASEPOOL
     {
-        juce_threadEntryPoint (userData);
+        juce_threadEntryPoint (myself);
     }
+
+   #if JUCE_ANDROID
+    if (androidJNIJavaVM != nullptr)
+    {
+        void* env = nullptr;
+        androidJNIJavaVM->GetEnv(&env, JNI_VERSION_1_2);
+
+        // only detach if we have actually been attached
+        if (env != nullptr)
+            androidJNIJavaVM->DetachCurrentThread();
+    }
+   #endif
 
     return nullptr;
 }
@@ -981,6 +980,7 @@ void Thread::launchThread()
         attrPtr = &attr;
         pthread_attr_setstacksize (attrPtr, threadStackSize);
     }
+
 
     if (pthread_create (&handle, attrPtr, threadEntryProc, this) == 0)
     {
@@ -1379,15 +1379,7 @@ private:
 
     static void* timerThread (void* param)
     {
-       #if JUCE_ANDROID
-        // JNI_OnLoad was not called - make sure you load the JUCE shared library
-        // using System.load inside of Java
-        jassert (androidJNIJavaVM != nullptr);
-
-        JNIEnv* env;
-        androidJNIJavaVM->AttachCurrentThread (&env, nullptr);
-        setEnv (env);
-       #else
+       #if ! JUCE_ANDROID
         int dummy;
         pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, &dummy);
        #endif

@@ -223,8 +223,8 @@ bool Process::openDocument (const String& fileName, const String& parameters)
         setsid();
 #endif
         // Child process
-        if (execvp (argv[0], (char**) argv) < 0)
-            _exit (0);
+        execvp (argv[0], (char**) argv);
+        _exit (0);
     }
 
     return cpid >= 0;

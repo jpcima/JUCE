@@ -49,29 +49,61 @@ struct HostPacketDecoder
             auto packetTimestamp = reader.read<PacketTimestamp>();
             deviceIndex &= 63; // top bit is used as a direction indicator
 
-            while (processNextMessage (handler, reader, deviceIndex, packetTimestamp))
-            {}
+            bool topologyChanged = false;
+
+            for (;;)
+            {
+                auto nextMessageType = getMessageType (reader);
+
+                if (nextMessageType == 0)
+                    break;
+
+                topologyChanged |= messageIncludesTopologyChange (nextMessageType);
+
+                if (! processNextMessage (handler, reader, (MessageFromDevice) nextMessageType, deviceIndex, packetTimestamp))
+                    break;
+            }
+
+            if (topologyChanged)
+                handler.notifyDetectorTopologyChanged();
+        }
+    }
+
+    static uint32 getMessageType (Packed7BitArrayReader& reader)
+    {
+        if (reader.getRemainingBits() < MessageType::bits)
+            return 0;
+
+        return reader.read<MessageType>().get();
+    }
+
+    static bool messageIncludesTopologyChange (uint32 messageType)
+    {
+        switch ((MessageFromDevice) messageType)
+        {
+            case MessageFromDevice::deviceTopology:
+            case MessageFromDevice::deviceTopologyExtend:
+            case MessageFromDevice::deviceTopologyEnd:
+            case MessageFromDevice::deviceVersion:
+            case MessageFromDevice::deviceName:
+                return true;
+
+            default:
+                return false;
         }
     }
 
     static bool processNextMessage (Handler& handler, Packed7BitArrayReader& reader,
-                                    TopologyIndex deviceIndex, PacketTimestamp packetTimestamp)
+                                    MessageFromDevice messageType, TopologyIndex deviceIndex,
+                                    PacketTimestamp packetTimestamp)
     {
-        if (reader.getRemainingBits() < MessageType::bits)
-            return false;
-
-        auto messageType = reader.read<MessageType>().get();
-
-        if (messageType == 0)
-            return false;
-
-        switch ((MessageFromDevice) messageType)
+        switch (messageType)
         {
             case MessageFromDevice::deviceTopology:           return handleTopology (handler, reader, true);
             case MessageFromDevice::deviceTopologyExtend:     return handleTopology (handler, reader, false);
             case MessageFromDevice::deviceTopologyEnd:        return handleTopologyEnd (handler, reader);
-            case MessageFromDevice::deviceVersionList:        return handleVersion (handler, reader);
-            case MessageFromDevice::deviceNameList:           return handleName (handler, reader);
+            case MessageFromDevice::deviceVersion:            return handleVersion (handler, reader);
+            case MessageFromDevice::deviceName:               return handleName (handler, reader);
             case MessageFromDevice::touchStart:               return handleTouch (handler, reader, deviceIndex, packetTimestamp, true, false);
             case MessageFromDevice::touchMove:                return handleTouch (handler, reader, deviceIndex, packetTimestamp, false, false);
             case MessageFromDevice::touchEnd:                 return handleTouch (handler, reader, deviceIndex, packetTimestamp, false, true);
@@ -308,7 +340,10 @@ struct HostPacketDecoder
             return false;
         }
 
-        handler.handleFirmwareUpdateACK (deviceIndex, reader.read<FirmwareUpdateACKCode>(), reader.read<FirmwareUpdateACKDetail>());
+        auto ackCode   = reader.read<FirmwareUpdateACKCode>();
+        auto ackDetail = reader.read<FirmwareUpdateACKDetail>();
+
+        handler.handleFirmwareUpdateACK (deviceIndex, ackCode, ackDetail);
         return true;
     }
 
@@ -339,6 +374,11 @@ struct HostPacketDecoder
         if (type == factorySyncEnd)
         {
             handler.handleConfigFactorySyncEndMessage (deviceIndex);
+        }
+
+        if (type == factorySyncReset)
+        {
+            handler.handleConfigFactorySyncResetMessage (deviceIndex);
         }
 
         return true;

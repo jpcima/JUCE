@@ -65,7 +65,7 @@ namespace MacFileHelpers
         {
             const String type (buf.f_fstypename);
 
-            while (*types != 0)
+            while (*types != nullptr)
                 if (type.equalsIgnoreCase (*types++))
                     return true;
         }
@@ -108,9 +108,9 @@ namespace MacFileHelpers
         const char* const argv[4] = { "/bin/sh", "-c", pathAndArguments.toUTF8(), nullptr };
 
 #if JUCE_USE_VFORK
-        const int cpid = vfork();
+        auto cpid = vfork();
 #else
-        const int cpid = fork();
+        auto cpid = fork();
 #endif
 
         if (cpid == 0)
@@ -119,8 +119,13 @@ namespace MacFileHelpers
             if (execvp (argv[0], (char**) argv) < 0)
                 _exit (0);
         }
+        else
+        {
+            if (cpid < 0)
+                return false;
+        }
 
-        return cpid >= 0;
+        return true;
     }
    #endif
 }
@@ -411,10 +416,8 @@ bool JUCE_CALLTYPE Process::openDocument (const String& fileName, const String& 
     JUCE_AUTORELEASEPOOL
     {
         NSString* fileNameAsNS (juceStringToNS (fileName));
-        NSURL* filenameAsURL ([NSURL URLWithString: fileNameAsNS]);
-
-        if (filenameAsURL == nil)
-            filenameAsURL = [NSURL fileURLWithPath: fileNameAsNS];
+        NSURL* filenameAsURL = File::createFileWithoutCheckingPath (fileName).exists() ? [NSURL fileURLWithPath: fileNameAsNS]
+                                                                                       : [NSURL URLWithString: fileNameAsNS];
 
       #if JUCE_IOS
         ignoreUnused (parameters);
@@ -441,11 +444,13 @@ bool JUCE_CALLTYPE Process::openDocument (const String& fileName, const String& 
             StringArray params;
             params.addTokens (parameters, true);
 
-            NSMutableArray* paramArray = [[[NSMutableArray alloc] init] autorelease];
+            NSMutableDictionary* dict = [[NSMutableDictionary new] autorelease];
+
+            NSMutableArray* paramArray = [[NSMutableArray new] autorelease];
+
             for (int i = 0; i < params.size(); ++i)
                 [paramArray addObject: juceStringToNS (params[i])];
 
-            NSMutableDictionary* dict = [[[NSMutableDictionary alloc] init] autorelease];
             [dict setObject: paramArray
                      forKey: nsStringLiteral ("NSWorkspaceLaunchConfigurationArguments")];
 

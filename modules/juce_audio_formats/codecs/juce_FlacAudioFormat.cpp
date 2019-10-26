@@ -117,9 +117,9 @@ namespace FlacNamespace
   #pragma clang diagnostic ignored "-Wconversion"
   #pragma clang diagnostic ignored "-Wshadow"
   #pragma clang diagnostic ignored "-Wdeprecated-register"
- #elif JUCE_GCC && (__GNUC__ >= 7)
-  #pragma GCC diagnostic push
-  #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+  #if __has_warning("-Wzero-as-null-pointer-constant")
+   #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
+  #endif
  #endif
 
  #if JUCE_INTEL
@@ -160,8 +160,6 @@ namespace FlacNamespace
 
  #if JUCE_CLANG
   #pragma clang diagnostic pop
- #elif JUCE_GCC && (__GNUC__ >= 7)
-  #pragma GCC diagnostic pop
  #endif
 }
 
@@ -303,7 +301,7 @@ public:
                 auto* src = buffer[i];
                 int n = i;
 
-                while (src == 0 && n > 0)
+                while (src == nullptr && n > 0)
                     src = buffer [--n];
 
                 if (src != nullptr)

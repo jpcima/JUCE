@@ -29,6 +29,7 @@
 #endif
 
 #include "../../juce_core/system/juce_TargetPlatform.h"
+#include "../utility/juce_CheckSettingMacros.h"
 #include "juce_IncludeModuleHeaders.h"
 
 using namespace juce;
@@ -37,6 +38,10 @@ namespace juce
 {
 
 AudioProcessor::WrapperType PluginHostType::jucePlugInClientCurrentWrapperType = AudioProcessor::wrapperType_Undefined;
+
+#if JucePlugin_Build_Unity
+ bool juce_isRunningInUnity()    { return PluginHostType::getPluginLoadedAs() == AudioProcessor::wrapperType_Unity; }
+#endif
 
 #ifndef JUCE_VST3_CAN_REPLACE_VST2
  #define JUCE_VST3_CAN_REPLACE_VST2 1
